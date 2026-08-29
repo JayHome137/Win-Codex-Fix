@@ -41,6 +41,7 @@ Win-Codex-Fix 以当前已注册的 AppX 为真源，先做快速验证，再只
 - 本地 CLI mirror 与当前 AppX 版本不一致；
 - `node_repl`、`cua_node` 的运行时或资源路径漂移；
 - Browser cache 的 `latest` / `.codex-plugin` 发现链接异常；
+- Chrome 扩展 ID 更新后，legacy / v2 Native Host manifest 与 HKCU 映射仍指向旧身份或旧 AppX 资源；
 - 已明确归属于旧临时 marketplace 的残留问题。
 
 它不是通用重装器，也不会处理 macOS/Linux、账号登录、网络代理、服务端故障或无法归因的未知错误。
@@ -119,6 +120,7 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File .\deploy\Install-FastRepair.ps
 | `RuntimeOnly` | 只修复 `cua_node` / `node_repl` 运行时 |
 | `BrowserDiscoveryOnly` | 只修复 Browser 的 `latest` 和 `.codex-plugin` 链接 |
 | `BrowserCacheOnly` | 只恢复当前 AppX Browser cache |
+| `BrowserNativeHostOnly` | 只同步复数扩展 ID、legacy manifest、Chrome HKCU 映射与两份 v2 Native Host manifest；无需关闭 Codex、Chrome、Edge |
 | `TmpRuntimeMarketplaceOnly` | 只处理已确认的旧临时 marketplace junction |
 | `Verify` | 只运行 Quick verifier，不写入 |
 

@@ -50,6 +50,7 @@ $projectFiles = @(
   'BUNDLE-MANIFEST.sha256',
   'deploy\Install-FastRepair.ps1',
   'agents\openai.yaml',
+  'scripts\BrowserNativeHost.ps1',
   'scripts\ChromeOpaqueTextMaterialization.ps1',
   'scripts\Invoke-CodexDesktopQuickRepair.ps1',
   'scripts\Start-CodexDesktopQuickRepairAfterExit.ps1',
