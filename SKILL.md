@@ -16,6 +16,7 @@ description: Windows Codex Desktop 更新后的快速、一次性热修。按验
 - `BrowserDiscoveryOnly`：只修复 Browser `latest` 与 `.codex-plugin` 发现链接。
 - `BrowserCacheOnly`：只恢复当前 AppX Browser cache。
 - `BrowserNativeHostOnly`：以当前 AppX 的复数扩展 ID 为真源，只修复 legacy manifest、Chrome HKCU 映射和两份 v2 manifest；默认热修，不关闭 Codex、Chrome 或 Edge。写入前保留同一事务的回滚副本，任一步失败即恢复。
+- `UpdateFirstLaunchDiagnosticOnly`：更新后只有后台进程、没有窗口时，快速区分 runtime 正在 materialize、update-policy 等待、正常启动中或未知 headless；只读，不等待数分钟，不关闭或重启进程。
 - `TmpRuntimeMarketplaceOnly`：只修复已确认的旧临时 marketplace 所有权问题。
 - `Verify`：只运行一次 Quick verifier。
 

@@ -122,6 +122,7 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File .\deploy\Install-FastRepair.ps
 | `BrowserDiscoveryOnly` | 只修复 Browser 的 `latest` 和 `.codex-plugin` 链接 |
 | `BrowserCacheOnly` | 只恢复当前 AppX Browser cache |
 | `BrowserNativeHostOnly` | 只同步复数扩展 ID、legacy manifest、Chrome HKCU 映射与两份 v2 Native Host manifest；无需关闭 Codex、Chrome、Edge |
+| `UpdateFirstLaunchDiagnosticOnly` | 更新后无窗口时只读识别 runtime materialization、update-policy 等待或未知 headless，不重启、不轮询 |
 | `TmpRuntimeMarketplaceOnly` | 只处理已确认的旧临时 marketplace junction |
 | `Verify` | 只运行 Quick verifier，不写入 |
 
