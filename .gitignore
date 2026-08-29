@@ -1,0 +1,20 @@
+# Local audit evidence and synchronization notes. These remain on the
+# maintainer's machine for traceability but are not part of the Skill package.
+.local-audit/
+audit-snapshot-*/
+AUDIT-REPORT-*.md
+STABILIZATION-CHANGELOG-*.md
+SYNC-STATE.md
+
+# Runtime data created by the deployment scripts.
+state/
+archives/
+
+# Windows/editor noise.
+*.log
+*.tmp
+*.bak
+__pycache__/
+.DS_Store
+Thumbs.db
+Desktop.ini

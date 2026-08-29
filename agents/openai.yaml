@@ -1,0 +1,4 @@
+interface:
+  display_name: Codex Desktop Fast Repair
+  short_description: One-shot Windows Codex bundled repair
+  default_prompt: After a Codex Desktop update, run the established one-shot quick repair route and keep Codex, Chrome, and Edge running unless a target file is actually locked; ask once before arming an after-exit continuation.
