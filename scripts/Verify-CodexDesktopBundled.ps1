@@ -1,5 +1,6 @@
 param(
   [switch]$Quick,
+  [switch]$BrowserNativeHostOnly,
   [switch]$LibraryOnly
 )
 
@@ -13,6 +14,12 @@ if (-not (Test-Path -LiteralPath $ChromeOpaqueTextLibrary -PathType Leaf)) {
   throw "Missing Chrome opaque-text materialization library: $ChromeOpaqueTextLibrary"
 }
 . $ChromeOpaqueTextLibrary
+
+$BrowserNativeHostLibrary = Join-Path $PSScriptRoot 'BrowserNativeHost.ps1'
+if (-not (Test-Path -LiteralPath $BrowserNativeHostLibrary -PathType Leaf)) {
+  throw "Missing Browser native-host library: $BrowserNativeHostLibrary"
+}
+. $BrowserNativeHostLibrary
 
 function Write-Check([string]$Name, [bool]$Ok, [string]$Detail = '') {
   if ($Ok) {
@@ -89,56 +96,6 @@ function Test-Json([string]$Path) {
   try {
     Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json | Out-Null
     return $true
-  } catch {
-    return $false
-  }
-}
-
-function Test-ChromeNativeHostV2Manifest(
-  [string]$Path,
-  [string]$ExtensionId,
-  [string]$ExtensionHostPath,
-  [string]$BrowserClientPath,
-  [string]$PluginVersion,
-  [string]$AppVersion,
-  [string]$ResourcesPath
-) {
-  if (-not (Test-Path -LiteralPath $Path)) {
-    return $false
-  }
-
-  try {
-    $document = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
-    $entry = @($document.entries) |
-      Where-Object {
-        @($_.nativeHostNames) -contains 'com.openai.codexextension' -and
-        @($_.extensionIds) -contains $ExtensionId
-      } |
-      Select-Object -First 1
-    if (-not $entry) {
-      return $false
-    }
-
-    return (
-      [int]$document.schemaVersion -eq 2 -and
-      [int]$entry.appServerProtocolVersion -eq 2 -and
-      [int]$entry.nativeHostProtocolVersion -eq 2 -and
-      [int]$entry.proxyPort -eq 0 -and
-      [string]$entry.channel -eq 'prod' -and
-       [string]$entry.appVersion -eq $AppVersion -and
-       [string]$entry.cliVersion -eq $AppVersion -and
-       [string]$entry.nativeHostVersion -eq $PluginVersion -and
-       [string]$entry.paths.browserClientPath -ieq $BrowserClientPath -and
-       [string]$entry.paths.extensionHostPath -ieq $ExtensionHostPath -and
-       [string]$entry.paths.resourcesPath -ieq $ResourcesPath -and
-       (Test-Path -LiteralPath $entry.paths.browserClientPath) -and
-       (Test-Path -LiteralPath $entry.paths.extensionHostPath) -and
-       (Test-Path -LiteralPath $entry.paths.codexCliPath) -and
-       (Test-Path -LiteralPath $entry.paths.nodePath) -and
-       (Test-Path -LiteralPath $entry.paths.nodeReplPath) -and
-       (Test-Path -LiteralPath $entry.paths.resourcesPath) -and
-       @($entry.paths.nodeModuleDirs | Where-Object { -not (Test-Path -LiteralPath $_) }).Count -eq 0
-    )
   } catch {
     return $false
   }
@@ -845,6 +802,109 @@ function Get-CurrentCuaRuntimeBin([string]$ConfigPath) {
   return Split-Path -Parent $command.Replace('/', '\')
 }
 
+function Write-NativeHostChecks(
+  $CurrentPackage,
+  [string]$CurrentBundledSource,
+  [string]$ChromeRoot,
+  [string]$CodexHomePath,
+  [string]$ConfigPath,
+  [string]$CodexCliPath,
+  [string]$LegacyManifestPath
+) {
+  $chromeVersion = $null
+  $identity = $null
+  $identityDetail = ''
+  try {
+    if (-not $CurrentPackage) {
+      throw 'current Codex AppX package is unavailable'
+    }
+    if (-not $CurrentBundledSource) {
+      throw 'current bundled source is unavailable'
+    }
+    $chromeVersion = Get-PluginVersion (Join-Path $CurrentBundledSource 'plugins\chrome')
+    if (-not $chromeVersion) {
+      throw 'current Chrome plugin version is unavailable'
+    }
+    $identity = Get-ChromiumNativeHostIdentity (Join-Path $ChromeRoot $chromeVersion)
+    $identityDetail = "$($identity.Schema); extensionIds=$(@($identity.ExtensionIds).Count)"
+  } catch {
+    $identityDetail = $_.Exception.Message
+  }
+  Write-Check 'native host extension identity' ($null -ne $identity) $identityDetail
+
+  if (-not $identity) {
+    Write-Check 'native host manifest content' $false $LegacyManifestPath
+    Write-Check 'chrome native host v2 manifest local' $false 'extension identity unavailable'
+    Write-Check 'chrome native host v2 manifest Codex home' $false 'extension identity unavailable'
+    Write-Check 'native host HKCU registry' $false 'extension identity unavailable'
+    return
+  }
+
+  $chromeVersionRoot = Join-Path $ChromeRoot $chromeVersion
+  $concreteHostPath = Join-Path $chromeVersionRoot 'extension-host\windows\x64\extension-host.exe'
+  $latestHostPath = Join-Path $ChromeRoot 'latest\extension-host\windows\x64\extension-host.exe'
+  $browserClientPath = Join-Path $chromeVersionRoot 'scripts\browser-client.mjs'
+  $runtimeBin = Get-CurrentCuaRuntimeBin $ConfigPath
+  $nodePath = if ($runtimeBin) { Join-Path $runtimeBin 'node.exe' } else { '' }
+  $nodeModuleDirs = if ($runtimeBin) { Join-Path $runtimeBin 'node_modules' } else { '' }
+  $nodeReplPath = if ($runtimeBin) { Join-Path $runtimeBin 'node_repl.exe' } else { '' }
+  $resourcesPath = Join-Path ([string]$CurrentPackage.InstallLocation) 'app\resources'
+  $legacyOk = Test-ChromiumNativeHostManifest `
+    $LegacyManifestPath `
+    $identity `
+    @($concreteHostPath, $latestHostPath)
+  Write-Check 'native host manifest content' $legacyOk $LegacyManifestPath
+
+  $localV2Manifest = Join-Path $env:LOCALAPPDATA 'OpenAI\Codex\chrome-native-hosts-v2.json'
+  $homeV2Manifest = Join-Path $CodexHomePath 'chrome-native-hosts-v2.json'
+  Write-Check `
+    'chrome native host v2 manifest local' `
+    (Test-ChromeNativeHostV2Manifest `
+      $localV2Manifest `
+      @($identity.ExtensionIds) `
+      ([string]$identity.HostName) `
+      ([string]$CurrentPackage.Version) `
+      $chromeVersion `
+      $browserClientPath `
+      $concreteHostPath `
+      $CodexCliPath `
+      $CodexHomePath `
+      $nodePath `
+      $nodeModuleDirs `
+      $nodeReplPath `
+      $resourcesPath) `
+    $localV2Manifest
+  Write-Check `
+    'chrome native host v2 manifest Codex home' `
+    (Test-ChromeNativeHostV2Manifest `
+      $homeV2Manifest `
+      @($identity.ExtensionIds) `
+      ([string]$identity.HostName) `
+      ([string]$CurrentPackage.Version) `
+      $chromeVersion `
+      $browserClientPath `
+      $concreteHostPath `
+      $CodexCliPath `
+      $CodexHomePath `
+      $nodePath `
+      $nodeModuleDirs `
+      $nodeReplPath `
+      $resourcesPath) `
+    $homeV2Manifest
+
+  $registryPath = "Registry::HKEY_CURRENT_USER\Software\Google\Chrome\NativeMessagingHosts\$($identity.HostName)"
+  $registryValue = $null
+  try {
+    $registryValue = (Get-ItemProperty -LiteralPath $registryPath -Name '(default)' -ErrorAction Stop).'(default)'
+  } catch {
+    $registryValue = $null
+  }
+  Write-Check `
+    'native host HKCU registry' `
+    (Test-WindowsPathEqual ([string]$registryValue) $LegacyManifestPath) `
+    ([string]$registryValue)
+}
+
 $script:Failed = $false
 
 if ($LibraryOnly) {
@@ -855,7 +915,6 @@ $CodexHome = Join-Path $env:USERPROFILE '.codex'
 $PluginCacheRoot = Join-Path $CodexHome 'plugins\cache\openai-bundled'
 $ConfigPath = Join-Path $CodexHome 'config.toml'
 $ExtensionManifest = Join-Path $env:LOCALAPPDATA 'OpenAI\extension\com.openai.codexextension.json'
-$ChromeNativeHostV2Manifest = Join-Path $env:LOCALAPPDATA 'OpenAI\Codex\chrome-native-hosts-v2.json'
 $CodexCliMirror = Join-Path $RepairRoot 'state\codex-cli\codex.exe'
 $CurrentCodexPackage = Get-AppxPackage -Name 'OpenAI.Codex' -ErrorAction SilentlyContinue |
   Sort-Object Version -Descending |
@@ -867,6 +926,19 @@ $BundledSource = if ($LatestWindowsAppsBundledSource) {
 } else {
   Find-BundledSource
 }
+if ($BrowserNativeHostOnly) {
+  Write-NativeHostChecks `
+    $CurrentCodexPackage `
+    $LatestWindowsAppsBundledSource `
+    (Join-Path $PluginCacheRoot 'chrome') `
+    $CodexHome `
+    $ConfigPath `
+    $CodexCliMirror `
+    $ExtensionManifest
+  if ($script:Failed) { exit 1 }
+  exit 0
+}
+
 $PersistentBundledMarketplaceRoot = Join-Path $RepairRoot 'state\openai-bundled-marketplace'
 Write-Check 'current AppX bundled source found' ($null -ne $LatestWindowsAppsBundledSource) $LatestWindowsAppsBundledSource
 Write-Check `
@@ -1037,48 +1109,14 @@ $chromeOpaqueTextDetail = if ($chromeOpaqueText) {
 }
 Write-Check 'chrome runtime opaque-text materialization' $chromeOpaqueTextOk $chromeOpaqueTextDetail
 
-if (Test-Path -LiteralPath $ExtensionManifest) {
-  $manifestOk = $false
-  $manifestDetail = $ExtensionManifest
-  try {
-    $manifest = Get-Content -LiteralPath $ExtensionManifest -Raw | ConvertFrom-Json
-    $manifestDetail = $manifest.path
-    $legacyConcreteHost = Join-Path $chromeRoot "$chromeVersion\extension-host\windows\x64\extension-host.exe"
-    $legacyLatestHost = Join-Path $chromeRoot 'latest\extension-host\windows\x64\extension-host.exe'
-    $manifestOk = (
-      $manifest.name -eq 'com.openai.codexextension' -and
-      $manifest.type -eq 'stdio' -and
-      @($manifest.allowed_origins) -contains 'chrome-extension://hehggadaopoacecdllhhajmbjkdcmajg/' -and
-      (Test-Path -LiteralPath $manifest.path) -and
-      (@($legacyConcreteHost, $legacyLatestHost) -contains [string]$manifest.path) -and
-      $manifest.path -notlike '*\.tmp\bundled-marketplaces\*'
-    )
-  } catch {
-    $manifestDetail = $_.Exception.Message
-  }
-  Write-Check 'native host manifest content' $manifestOk $manifestDetail
-}
-
-$chromeV2Ok = Test-ChromeNativeHostV2Manifest `
-  $ChromeNativeHostV2Manifest `
-  'hehggadaopoacecdllhhajmbjkdcmajg' `
-  (Join-Path $chromeRoot "$chromeVersion\extension-host\windows\x64\extension-host.exe") `
-  (Join-Path $chromeRoot "$chromeVersion\scripts\browser-client.mjs") `
-  $chromeVersion `
-  ([string]$CurrentCodexPackage.Version) `
-  (Join-Path ([string]$CurrentCodexPackage.InstallLocation) 'app\resources')
-Write-Check 'chrome native host v2 manifest' $chromeV2Ok $ChromeNativeHostV2Manifest
-
-$regOk = $false
-$regDetail = ''
-try {
-  $regValue = (Get-ItemProperty -LiteralPath 'Registry::HKEY_CURRENT_USER\Software\Google\Chrome\NativeMessagingHosts\com.openai.codexextension' -Name '(default)' -ErrorAction Stop).'(default)'
-  $regDetail = $regValue
-  $regOk = ($regValue -eq $ExtensionManifest)
-} catch {
-  $regDetail = $_.Exception.Message
-}
-Write-Check 'native host HKCU registry' $regOk $regDetail
+Write-NativeHostChecks `
+  $CurrentCodexPackage `
+  $LatestWindowsAppsBundledSource `
+  $chromeRoot `
+  $CodexHome `
+  $ConfigPath `
+  $CodexCliMirror `
+  $ExtensionManifest
 
 $runtimeBin = Get-CurrentCuaRuntimeBin $ConfigPath
 $runtimeConfigText = if (Test-Path -LiteralPath $ConfigPath) { Get-Content -LiteralPath $ConfigPath -Raw } else { $null }

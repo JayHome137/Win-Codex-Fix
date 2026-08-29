@@ -1,5 +1,5 @@
 param(
-  [ValidateSet('Auto','CliMirrorOnly','RuntimeOnly','BrowserDiscoveryOnly','BrowserCacheOnly','TmpRuntimeMarketplaceOnly','Verify')]
+  [ValidateSet('Auto','CliMirrorOnly','RuntimeOnly','BrowserDiscoveryOnly','BrowserCacheOnly','BrowserNativeHostOnly','TmpRuntimeMarketplaceOnly','Verify')]
   [string]$Route = 'Auto',
   [switch]$ArmAfterExit,
   [string]$ProjectRoot = ''
@@ -35,6 +35,13 @@ function Invoke-VerifyQuick {
   return [pscustomobject]@{ Code = $code; Text = ($output -join "`n") }
 }
 
+function Invoke-VerifyBrowserNativeHost {
+  $output = @(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Verify -BrowserNativeHostOnly 2>&1)
+  $code = if ($null -eq $LASTEXITCODE) { 0 } else { [int]$LASTEXITCODE }
+  foreach ($line in $output) { Write-Host $line }
+  return [pscustomobject]@{ Code = $code; Text = ($output -join "`n") }
+}
+
 if ($ArmAfterExit) {
   if (-not (Test-Path -LiteralPath $AfterExit -PathType Leaf)) {
     throw "Missing one-shot after-exit helper: $AfterExit"
@@ -51,6 +58,7 @@ function Invoke-Target([string]$Target) {
     'RuntimeOnly' { return Invoke-Child $Repair @('-RuntimeOnly') }
     'BrowserDiscoveryOnly' { return Invoke-Child $Repair @('-BrowserDiscoveryOnly') }
     'BrowserCacheOnly' { return Invoke-Child $Repair @('-BrowserCacheOnly') }
+    'BrowserNativeHostOnly' { return Invoke-Child $Repair @('-BrowserNativeHostOnly') }
     'TmpRuntimeMarketplaceOnly' { return Invoke-Child $Repair @('-TmpRuntimeMarketplaceOnly') }
     'Verify' { return (Invoke-VerifyQuick).Code }
     default { throw "Unsupported quick repair route: $Target" }
@@ -59,8 +67,14 @@ function Invoke-Target([string]$Target) {
 
 if ($Route -ne 'Auto') {
   $targetResult = Invoke-Target $Route
-  if ($Route -in @('CliMirrorOnly','RuntimeOnly','BrowserDiscoveryOnly','BrowserCacheOnly','TmpRuntimeMarketplaceOnly')) {
-    if ($targetResult -eq 0) { $targetResult = (Invoke-VerifyQuick).Code }
+  if ($Route -in @('CliMirrorOnly','RuntimeOnly','BrowserDiscoveryOnly','BrowserCacheOnly','BrowserNativeHostOnly','TmpRuntimeMarketplaceOnly')) {
+    if ($targetResult -eq 0) {
+      $targetResult = if ($Route -eq 'BrowserNativeHostOnly') {
+        (Invoke-VerifyBrowserNativeHost).Code
+      } else {
+        (Invoke-VerifyQuick).Code
+      }
+    }
   }
   exit $targetResult
 }
@@ -90,6 +104,8 @@ if ($failureText -match '(?i)code-mode-host|CLI mirror|codex-cli') {
   $selectedRoute = 'BrowserCacheOnly'
 } elseif ($failureText -match '(?i)resourcesPath|nodePath|nodeModuleDirs|nodeReplPath|node_repl|cua_node') {
   $selectedRoute = 'RuntimeOnly'
+} elseif ($failureText -match '(?i)native host|native-host|allowed_origins|NativeMessagingHosts') {
+  $selectedRoute = 'BrowserNativeHostOnly'
 }
 
 if (-not $selectedRoute) {
@@ -108,7 +124,11 @@ if ($repairResult -ne 0) {
   exit $repairResult
 }
 
-$final = Invoke-VerifyQuick
+$final = if ($selectedRoute -eq 'BrowserNativeHostOnly') {
+  Invoke-VerifyBrowserNativeHost
+} else {
+  Invoke-VerifyQuick
+}
 if ($final.Code -eq 0) {
   Write-Host '[codex-quick] repair and quick verification passed.'
 } else {

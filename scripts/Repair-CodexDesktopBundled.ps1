@@ -3,6 +3,7 @@ param(
   [switch]$RuntimeOnly,
   [switch]$BrowserDiscoveryOnly,
   [switch]$BrowserCacheOnly,
+  [switch]$BrowserNativeHostOnly,
   [switch]$TmpRuntimeMarketplaceOnly,
   [switch]$AutomaticPostUpdate,
   [string]$ExpectedPackageFullName = ''
@@ -19,11 +20,17 @@ if (-not (Test-Path -LiteralPath $ChromeOpaqueTextLibrary -PathType Leaf)) {
 }
 . $ChromeOpaqueTextLibrary
 
+$BrowserNativeHostLibrary = Join-Path $PSScriptRoot 'BrowserNativeHost.ps1'
+if (-not (Test-Path -LiteralPath $BrowserNativeHostLibrary -PathType Leaf)) {
+  throw "Missing Browser native-host library: $BrowserNativeHostLibrary"
+}
+. $BrowserNativeHostLibrary
+
 $selectedTargetedModes = @(
-  @($CliMirrorOnly, $RuntimeOnly, $BrowserDiscoveryOnly, $BrowserCacheOnly, $TmpRuntimeMarketplaceOnly) | Where-Object { $_ }
+  @($CliMirrorOnly, $RuntimeOnly, $BrowserDiscoveryOnly, $BrowserCacheOnly, $BrowserNativeHostOnly, $TmpRuntimeMarketplaceOnly) | Where-Object { $_ }
 )
 if ($selectedTargetedModes.Count -gt 1) {
-  throw 'Choose only one targeted repair mode: -CliMirrorOnly, -RuntimeOnly, -BrowserDiscoveryOnly, -BrowserCacheOnly, or -TmpRuntimeMarketplaceOnly.'
+  throw 'Choose only one targeted repair mode: -CliMirrorOnly, -RuntimeOnly, -BrowserDiscoveryOnly, -BrowserCacheOnly, -BrowserNativeHostOnly, or -TmpRuntimeMarketplaceOnly.'
 }
 if ($AutomaticPostUpdate -and $selectedTargetedModes.Count -gt 0) {
   throw '-AutomaticPostUpdate cannot be combined with a targeted repair mode.'
@@ -39,6 +46,24 @@ function Write-Step([string]$Message) {
 function New-Utf8NoBomFile([string]$Path, [string]$Text) {
   New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Path) | Out-Null
   [System.IO.File]::WriteAllText($Path, $Text, [System.Text.UTF8Encoding]::new($false))
+}
+
+function New-Utf8NoBomFileAtomically([string]$Path, [string]$Text) {
+  $directory = Split-Path -Parent $Path
+  New-Item -ItemType Directory -Force -Path $directory | Out-Null
+  $temporary = Join-Path $directory ('.{0}.atomic.{1}.tmp' -f (Split-Path -Leaf $Path), ([guid]::NewGuid().ToString('N')))
+  $backup = Join-Path $directory ('.{0}.atomic.{1}.bak' -f (Split-Path -Leaf $Path), ([guid]::NewGuid().ToString('N')))
+  try {
+    [System.IO.File]::WriteAllText($temporary, $Text, [System.Text.UTF8Encoding]::new($false))
+    if ([System.IO.File]::Exists($Path)) {
+      [System.IO.File]::Replace($temporary, $Path, $backup)
+    } else {
+      [System.IO.File]::Move($temporary, $Path)
+    }
+  } finally {
+    Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
+  }
 }
 
 function Find-BundledSource {
@@ -2225,7 +2250,7 @@ function Get-ShortSha256([string[]]$Values) {
 
 function Ensure-ChromeNativeHostV2Manifest(
   [string]$CodexHomePath,
-  [string]$ExtensionId,
+  [string[]]$ExtensionIds,
   [string]$HostName,
   [string]$AppVersion,
   [string]$PluginVersion,
@@ -2237,21 +2262,21 @@ function Ensure-ChromeNativeHostV2Manifest(
   [string]$NodeReplPath,
   [string]$ResourcesPath
 ) {
+  $changedCount = 0
   $manifestPaths = @(
     (Join-Path $env:LOCALAPPDATA 'OpenAI\Codex\chrome-native-hosts-v2.json'),
     (Join-Path $CodexHomePath 'chrome-native-hosts-v2.json')
   )
   $channel = 'prod'
-  $entryId = 'codex-runtime-' + (Get-ShortSha256 @(
-      $channel,
-      $ExtensionId,
-      $HostName,
-      $PluginVersion,
-      $ExtensionHostPath,
-      $CodexCliPath,
-      $CodexHomePath,
-      $ResourcesPath
-    ))
+  $entryIdInputs = @($channel) + @($ExtensionIds) + @(
+    $HostName,
+    $PluginVersion,
+    $ExtensionHostPath,
+    $CodexCliPath,
+    $CodexHomePath,
+    $ResourcesPath
+  )
+  $entryId = 'codex-runtime-' + (Get-ShortSha256 $entryIdInputs)
   $installId = 'codex-install-' + (Get-ShortSha256 @($HostName, $ResourcesPath, $CodexHomePath))
   $timestamp = (Get-Date).ToUniversalTime().ToString('o')
   $resource = [ordered]@{
@@ -2262,7 +2287,7 @@ function Ensure-ChromeNativeHostV2Manifest(
     cliVersion = $AppVersion
     entryId = $entryId
     extensionBuildChannels = @($channel)
-    extensionIds = @($ExtensionId)
+    extensionIds = @($ExtensionIds)
     installId = $installId
     nativeHostNames = @($HostName)
     nativeHostProtocolVersion = 2
@@ -2283,6 +2308,24 @@ function Ensure-ChromeNativeHostV2Manifest(
   }
 
   foreach ($manifestPath in $manifestPaths) {
+    if (Test-ChromeNativeHostV2Manifest `
+      $manifestPath `
+      $ExtensionIds `
+      $HostName `
+      $AppVersion `
+      $PluginVersion `
+      $BrowserClientPath `
+      $ExtensionHostPath `
+      $CodexCliPath `
+      $CodexHomePath `
+      $NodePath `
+      $NodeModuleDirs `
+      $NodeReplPath `
+      $ResourcesPath) {
+      Write-Step "Chrome native host v2 manifest OK: $manifestPath"
+      continue
+    }
+
     $entries = @()
     if (Test-Path -LiteralPath $manifestPath) {
       try {
@@ -2300,10 +2343,28 @@ function Ensure-ChromeNativeHostV2Manifest(
       schemaVersion = 2
       entries = @($entries) + @($resource)
     }
-    New-Utf8NoBomFile $manifestPath ($document | ConvertTo-Json -Depth 12)
+    New-Utf8NoBomFileAtomically $manifestPath ($document | ConvertTo-Json -Depth 12)
+    if (-not (Test-ChromeNativeHostV2Manifest `
+        $manifestPath `
+        $ExtensionIds `
+        $HostName `
+        $AppVersion `
+        $PluginVersion `
+        $BrowserClientPath `
+        $ExtensionHostPath `
+        $CodexCliPath `
+        $CodexHomePath `
+        $NodePath `
+        $NodeModuleDirs `
+        $NodeReplPath `
+        $ResourcesPath)) {
+      throw "Chrome native host v2 manifest post-write verification failed: $manifestPath"
+    }
+    $changedCount++
   }
 
-  Write-Step 'Chrome native host v2 manifest restored.'
+  Write-Step "Chrome native host v2 manifests verified: changed=$changedCount."
+  return $changedCount
 }
 
 function Ensure-BundledHealthCheckTask {
@@ -2483,6 +2544,127 @@ if ($CliMirrorOnly) {
   }
 
   Write-Step "CLI-mirror-only synchronization complete: $($result.Status)"
+  exit 0
+}
+
+if ($BrowserNativeHostOnly) {
+  Write-Step 'Starting targeted Browser native-host repair; Codex, Chrome, Edge, caches, junctions, runtime, config, marketplace, CLI mirror, and tasks remain untouched.'
+
+  $currentPackage = Get-AppxPackage -Name 'OpenAI.Codex' -ErrorAction SilentlyContinue |
+    Sort-Object Version -Descending |
+    Select-Object -First 1
+  if (-not $currentPackage) {
+    throw 'BrowserNativeHostOnly could not resolve the current registered Codex AppX package.'
+  }
+
+  $bundledSource = Find-LatestWindowsAppsBundledSource
+  if (-not $bundledSource) {
+    throw 'BrowserNativeHostOnly could not resolve the current registered AppX bundled source.'
+  }
+  $chromeSource = Join-Path $bundledSource 'plugins\chrome'
+  $chromeVersion = Get-PluginVersion $chromeSource
+  $chromeRoot = Join-Path $PluginCacheRoot 'chrome'
+  $chromeVersionRoot = Join-Path $chromeRoot $chromeVersion
+  $identity = Get-ChromiumNativeHostIdentity $chromeVersionRoot
+  $identityRelativePath = 'scripts\' + (Split-Path -Leaf ([string]$identity.ConfigPath))
+  if (-not (Test-PluginCache $chromeRoot $chromeVersion @(
+        $identityRelativePath,
+        'scripts\browser-client.mjs',
+        'extension-host\windows\x64\extension-host.exe',
+        '.codex-plugin\plugin.json'
+      ))) {
+    throw 'BrowserNativeHostOnly requires the current Chrome cache and latest link; repair that owner first.'
+  }
+
+  $chromeLatestRoot = Join-Path $chromeRoot 'latest'
+  $concreteHostPath = Join-Path $chromeVersionRoot 'extension-host\windows\x64\extension-host.exe'
+  $latestHostPath = Join-Path $chromeLatestRoot 'extension-host\windows\x64\extension-host.exe'
+  $browserClientPath = Join-Path $chromeVersionRoot 'scripts\browser-client.mjs'
+  $codexCliPath = Join-Path $RepairRoot 'state\codex-cli\codex.exe'
+  if (-not (Test-Path -LiteralPath $codexCliPath -PathType Leaf)) {
+    throw 'BrowserNativeHostOnly requires the existing healthy CLI mirror; run CliMirrorOnly for that owner.'
+  }
+
+  $runtimeBin = Get-CurrentCuaRuntimeBin $ConfigPath
+  if (-not (Test-CuaRuntime $runtimeBin)) {
+    throw 'BrowserNativeHostOnly requires the existing healthy cua_node runtime; run RuntimeOnly for that owner.'
+  }
+
+  $resourcesPath = Join-Path ([string]$currentPackage.InstallLocation) 'app\resources'
+  if (-not (Test-Path -LiteralPath $resourcesPath -PathType Container)) {
+    throw 'BrowserNativeHostOnly could not resolve the current AppX resources path.'
+  }
+
+  $allowedHostPaths = @($concreteHostPath, $latestHostPath)
+  $changed = 0
+  if (-not (Test-ChromiumNativeHostManifest $ExtensionManifest $identity $allowedHostPaths)) {
+    $manifestObject = [ordered]@{
+      allowed_origins = @(Get-ChromiumNativeHostExpectedOrigins $identity)
+      description = 'Codex chrome native messaging host'
+      name = [string]$identity.HostName
+      path = $latestHostPath
+      type = 'stdio'
+    }
+    New-Utf8NoBomFileAtomically $ExtensionManifest ($manifestObject | ConvertTo-Json -Depth 10)
+    if (-not (Test-ChromiumNativeHostManifest $ExtensionManifest $identity $allowedHostPaths)) {
+      throw 'BrowserNativeHostOnly legacy manifest post-write verification failed.'
+    }
+    $changed++
+  }
+
+  $registryPath = "Registry::HKEY_CURRENT_USER\Software\Google\Chrome\NativeMessagingHosts\$($identity.HostName)"
+  try {
+    $registryManifestPath = (Get-ItemProperty -LiteralPath $registryPath -Name '(default)' -ErrorAction Stop).'(default)'
+  } catch {
+    $registryManifestPath = $null
+  }
+  if (-not (Test-WindowsPathEqual ([string]$registryManifestPath) $ExtensionManifest)) {
+    New-Item -Path $registryPath -Force | Out-Null
+    Set-Item -LiteralPath $registryPath -Value $ExtensionManifest
+    $changed++
+  }
+
+  $changed += [int](Ensure-ChromeNativeHostV2Manifest `
+    $CodexHome `
+    @($identity.ExtensionIds) `
+    ([string]$identity.HostName) `
+    ([string]$currentPackage.Version) `
+    $chromeVersion `
+    $browserClientPath `
+    $concreteHostPath `
+    $codexCliPath `
+    (Join-Path $runtimeBin 'node.exe') `
+    (Join-Path $runtimeBin 'node_modules') `
+    (Join-Path $runtimeBin 'node_repl.exe') `
+    $resourcesPath)
+
+  $registryManifestPath = (Get-ItemProperty -LiteralPath $registryPath -Name '(default)' -ErrorAction Stop).'(default)'
+  if (-not (Test-WindowsPathEqual ([string]$registryManifestPath) $ExtensionManifest)) {
+    throw 'BrowserNativeHostOnly registry post-write verification failed.'
+  }
+  foreach ($v2ManifestPath in @(
+      (Join-Path $env:LOCALAPPDATA 'OpenAI\Codex\chrome-native-hosts-v2.json'),
+      (Join-Path $CodexHome 'chrome-native-hosts-v2.json')
+    )) {
+    if (-not (Test-ChromeNativeHostV2Manifest `
+        $v2ManifestPath `
+        @($identity.ExtensionIds) `
+        ([string]$identity.HostName) `
+        ([string]$currentPackage.Version) `
+        $chromeVersion `
+        $browserClientPath `
+        $concreteHostPath `
+        $codexCliPath `
+        $CodexHome `
+        (Join-Path $runtimeBin 'node.exe') `
+        (Join-Path $runtimeBin 'node_modules') `
+        (Join-Path $runtimeBin 'node_repl.exe') `
+        $resourcesPath)) {
+      throw "BrowserNativeHostOnly v2 manifest post-write verification failed: $v2ManifestPath"
+    }
+  }
+
+  Write-Step "Targeted Browser native-host repair complete: schema=$($identity.Schema), extensionIds=$(@($identity.ExtensionIds).Count), directChanges=$changed. No process was stopped or restarted."
   exit 0
 }
 
@@ -2791,15 +2973,9 @@ $runtimeBin = Repair-CuaRuntimeIfMissing $ConfigPath $CuaNodeSource -DeferConfig
 Ensure-NodeReplConfiguration $ConfigPath $runtimeBin $browserRoot $browserVersion $chromeRoot $chromeVersion
 $runtimeBin = Repair-CuaRuntimeIfMissing $ConfigPath $CuaNodeSource
 
-$extensionIdJsonPath = Join-Path $chromeRoot "$chromeVersion\scripts\extension-id.json"
-if (Test-Path -LiteralPath $extensionIdJsonPath) {
-  $extensionInfo = Get-Content -LiteralPath $extensionIdJsonPath -Raw | ConvertFrom-Json
-  $extensionId = [string]$extensionInfo.extensionId
-  $hostName = [string]$extensionInfo.extensionHostName
-} else {
-  $extensionId = 'hehggadaopoacecdllhhajmbjkdcmajg'
-  $hostName = 'com.openai.codexextension'
-}
+$extensionIdentity = Get-ChromiumNativeHostIdentity (Join-Path $chromeRoot $chromeVersion)
+$extensionIds = @($extensionIdentity.ExtensionIds)
+$hostName = [string]$extensionIdentity.HostName
 
 $extensionHostExe = Join-Path $chromeRoot "$chromeVersion\extension-host\windows\x64\extension-host.exe"
 $extensionHostLatest = Join-Path $chromeRoot 'latest\extension-host\windows\x64\extension-host.exe'
@@ -2815,7 +2991,9 @@ if (Test-Path -LiteralPath $ExtensionManifest) {
       $manifest.name -eq $hostName -and
       $manifest.type -eq 'stdio' -and
       (@($extensionHostExe, $extensionHostLatest) -contains [string]$manifest.path) -and
-      @($manifest.allowed_origins) -contains "chrome-extension://$extensionId/"
+      (Test-ExactStringArray `
+        @($manifest.allowed_origins | ForEach-Object { [string]$_ }) `
+        @(Get-ChromiumNativeHostExpectedOrigins $extensionIdentity))
     )
   } catch {
     $manifestNeedsRepair = $true
@@ -2825,7 +3003,7 @@ if (Test-Path -LiteralPath $ExtensionManifest) {
 if ($manifestNeedsRepair) {
   Write-Step 'Repairing Chrome native host manifest.'
   $manifestObject = [ordered]@{
-    allowed_origins = @("chrome-extension://$extensionId/")
+    allowed_origins = @(Get-ChromiumNativeHostExpectedOrigins $extensionIdentity)
     description = 'Codex chrome native messaging host'
     name = $hostName
     path = $extensionHostLatest
@@ -2862,7 +3040,7 @@ $resourcesPathForChrome = if ($currentCodexCliSource) {
 }
 Ensure-ChromeNativeHostV2Manifest `
   $CodexHome `
-  $extensionId `
+  $extensionIds `
   $hostName `
   $currentChromeAppVersion `
   $chromeVersion `
@@ -2872,7 +3050,7 @@ Ensure-ChromeNativeHostV2Manifest `
   (Join-Path $runtimeBin 'node.exe') `
   (Join-Path $runtimeBin 'node_modules') `
   (Join-Path $runtimeBin 'node_repl.exe') `
-  $resourcesPathForChrome
+  $resourcesPathForChrome | Out-Null
 
 foreach ($plugin in @('browser', 'chrome', 'computer-use')) {
   Ensure-PluginEnabled $ConfigPath $plugin
