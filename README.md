@@ -109,7 +109,8 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File .\deploy\Install-FastRepair.ps
 2. **先归因再修复**：只处理 verifier 能明确归属的 CLI、运行时、Browser discovery/cache 或 marketplace 层。
 3. **一次只走一条路**：路由成功或失败后都停止，不叠加无关 fallback。
 4. **最小写入**：只修改目标层需要的 mirror、链接、manifest 或环境配置。
-5. **写后复核**：立即检查哈希、长度、链接目标和关键资源是否与当前 AppX 一致。
+5. **可回滚提交**：Native Host 多文件更新会先保存原始字节与注册表默认值，任一步失败即恢复。
+6. **写后复核**：立即检查哈希、长度、链接目标和关键资源是否与当前 AppX 一致。
 
 ## 🧭 修复路由
 
@@ -140,6 +141,7 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File .\deploy\Install-FastRepair.ps
 SKILL.md                         Skill 触发条件与操作边界
 agents/openai.yaml               Codex 显示信息与默认提示
 scripts/                         PowerShell、Python、VBS 实现
+tests/                           Windows PowerShell 5.1 / 7 focused fixtures
 deploy/Install-FastRepair.ps1    Windows 安装与更新脚本
 docs/quick-repair.md             快速决策说明
 BUNDLE-MANIFEST.sha256           发布文件 SHA-256 清单

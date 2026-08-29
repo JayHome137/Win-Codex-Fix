@@ -61,6 +61,7 @@ $projectFiles = @(
   'scripts\RunHidden-CodexDesktopBundledPostUpdateRepair.vbs',
   'scripts\Start-CodexDesktopOnce.ps1',
   'scripts\Verify-CodexDesktopBundled.ps1',
+  'tests\Test-BrowserNativeHost.ps1',
   'docs\quick-repair.md'
 )
 foreach ($relative in $projectFiles) { Copy-StageFile $relative $ProjectRoot }

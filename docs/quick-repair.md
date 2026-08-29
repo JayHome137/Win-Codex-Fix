@@ -17,4 +17,4 @@ pwsh.exe -NoProfile -NonInteractive -File "$root\scripts\Invoke-CodexDesktopQuic
 
 显式 route 仅在错误 owner 已明确时使用：`CliMirrorOnly`、`RuntimeOnly`、`BrowserDiscoveryOnly`、`BrowserCacheOnly`、`BrowserNativeHostOnly`、`TmpRuntimeMarketplaceOnly`、`Verify`。
 
-`BrowserNativeHostOnly` 是热修路由：只同步当前扩展 ID 对应的 legacy manifest、Google Chrome HKCU 映射和两份 v2 manifest，不关闭或重启 Codex、Chrome、Edge，也不修改 cache、junction、runtime、CLI mirror、配置或任务。
+`BrowserNativeHostOnly` 是热修路由：从当前 AppX 读取扩展 ID，只同步 legacy manifest、Google Chrome HKCU 映射和两份 v2 manifest，不关闭或重启 Codex、Chrome、Edge，也不修改 cache、junction、runtime、CLI mirror、配置或任务。实际写入前保留回滚副本，任一步失败即恢复原状态。

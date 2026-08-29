@@ -15,7 +15,7 @@ description: Windows Codex Desktop 更新后的快速、一次性热修。按验
 - `RuntimeOnly`：只修复 `cua_node`/`node_repl` 运行时。
 - `BrowserDiscoveryOnly`：只修复 Browser `latest` 与 `.codex-plugin` 发现链接。
 - `BrowserCacheOnly`：只恢复当前 AppX Browser cache。
-- `BrowserNativeHostOnly`：只修复当前 Chrome 扩展身份对应的 legacy manifest、Chrome HKCU 映射和两份 v2 manifest；支持 `extension-ids.json` 的复数 ID，默认热修，不关闭 Codex、Chrome 或 Edge。
+- `BrowserNativeHostOnly`：以当前 AppX 的复数扩展 ID 为真源，只修复 legacy manifest、Chrome HKCU 映射和两份 v2 manifest；默认热修，不关闭 Codex、Chrome 或 Edge。写入前保留同一事务的回滚副本，任一步失败即恢复。
 - `TmpRuntimeMarketplaceOnly`：只修复已确认的旧临时 marketplace 所有权问题。
 - `Verify`：只运行一次 Quick verifier。
 
