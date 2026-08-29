@@ -825,7 +825,7 @@ function Write-NativeHostChecks(
     if (-not $chromeVersion) {
       throw 'current Chrome plugin version is unavailable'
     }
-    $identity = Get-ChromiumNativeHostIdentity (Join-Path $ChromeRoot $chromeVersion)
+    $identity = Get-ChromiumNativeHostIdentity (Join-Path $CurrentBundledSource 'plugins\chrome')
     $identityDetail = "$($identity.Schema); extensionIds=$(@($identity.ExtensionIds).Count)"
   } catch {
     $identityDetail = $_.Exception.Message

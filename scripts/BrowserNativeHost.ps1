@@ -172,3 +172,255 @@ function Test-ChromeNativeHostV2Manifest(
     return $false
   }
 }
+
+function Write-BrowserNativeHostStep([string]$Message) {
+  Write-Host "[codex-repair] $Message"
+}
+
+function Write-BrowserNativeHostUtf8NoBomAtomically([string]$Path, [string]$Text) {
+  $directory = Split-Path -Parent $Path
+  New-Item -ItemType Directory -Force -Path $directory | Out-Null
+  $temporary = Join-Path $directory ('.{0}.atomic.{1}.tmp' -f (Split-Path -Leaf $Path), ([guid]::NewGuid().ToString('N')))
+  $backup = Join-Path $directory ('.{0}.atomic.{1}.bak' -f (Split-Path -Leaf $Path), ([guid]::NewGuid().ToString('N')))
+  try {
+    [System.IO.File]::WriteAllText($temporary, $Text, [System.Text.UTF8Encoding]::new($false))
+    if ([System.IO.File]::Exists($Path)) {
+      [System.IO.File]::Replace($temporary, $Path, $backup)
+    } else {
+      [System.IO.File]::Move($temporary, $Path)
+    }
+  } finally {
+    Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
+  }
+}
+
+function Get-BrowserNativeHostShortSha256([string[]]$Values) {
+  $joined = $Values -join [char]0
+  $bytes = [System.Text.Encoding]::UTF8.GetBytes($joined)
+  $sha = [System.Security.Cryptography.SHA256]::Create()
+  try {
+    $digest = $sha.ComputeHash($bytes)
+  } finally {
+    $sha.Dispose()
+  }
+  return ([System.BitConverter]::ToString($digest) -replace '-', '').ToLowerInvariant().Substring(0, 32)
+}
+
+function Ensure-ChromeNativeHostV2Manifest(
+  [string]$CodexHomePath,
+  [string[]]$ExtensionIds,
+  [string]$HostName,
+  [string]$AppVersion,
+  [string]$PluginVersion,
+  [string]$BrowserClientPath,
+  [string]$ExtensionHostPath,
+  [string]$CodexCliPath,
+  [string]$NodePath,
+  [string]$NodeModuleDirs,
+  [string]$NodeReplPath,
+  [string]$ResourcesPath
+) {
+  $changedCount = 0
+  $manifestPaths = @(
+    (Join-Path $env:LOCALAPPDATA 'OpenAI\Codex\chrome-native-hosts-v2.json'),
+    (Join-Path $CodexHomePath 'chrome-native-hosts-v2.json')
+  )
+  $channel = 'prod'
+  $entryIdInputs = @($channel) + @($ExtensionIds) + @(
+    $HostName,
+    $PluginVersion,
+    $ExtensionHostPath,
+    $CodexCliPath,
+    $CodexHomePath,
+    $ResourcesPath
+  )
+  $entryId = 'codex-runtime-' + (Get-BrowserNativeHostShortSha256 $entryIdInputs)
+  $installId = 'codex-install-' + (Get-BrowserNativeHostShortSha256 @($HostName, $ResourcesPath, $CodexHomePath))
+  $resource = [ordered]@{
+    schemaVersion = 2
+    appServerProtocolVersion = 2
+    appVersion = $AppVersion
+    channel = $channel
+    cliVersion = $AppVersion
+    entryId = $entryId
+    extensionBuildChannels = @($channel)
+    extensionIds = @($ExtensionIds)
+    installId = $installId
+    nativeHostNames = @($HostName)
+    nativeHostProtocolVersion = 2
+    nativeHostVersion = $PluginVersion
+    paths = [ordered]@{
+      browserClientPath = $BrowserClientPath
+      codexCliPath = $CodexCliPath
+      codexHome = $CodexHomePath
+      extensionHostPath = $ExtensionHostPath
+      nodePath = $NodePath
+      nodeModuleDirs = @($NodeModuleDirs)
+      nodeReplPath = $NodeReplPath
+      resourcesPath = $ResourcesPath
+    }
+    proxyHost = '127.0.0.1'
+    proxyPort = 0
+    updatedAt = (Get-Date).ToUniversalTime().ToString('o')
+  }
+
+  foreach ($manifestPath in $manifestPaths) {
+    if (Test-ChromeNativeHostV2Manifest `
+      $manifestPath `
+      $ExtensionIds `
+      $HostName `
+      $AppVersion `
+      $PluginVersion `
+      $BrowserClientPath `
+      $ExtensionHostPath `
+      $CodexCliPath `
+      $CodexHomePath `
+      $NodePath `
+      $NodeModuleDirs `
+      $NodeReplPath `
+      $ResourcesPath) {
+      Write-BrowserNativeHostStep "Chrome native host v2 manifest OK: $manifestPath"
+      continue
+    }
+
+    $entries = @()
+    if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
+      try {
+        $existing = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
+        $entries = @($existing.entries) | Where-Object {
+          $names = @($_.nativeHostNames)
+          ([string]$_.entryId -ne $entryId) -and ($names -notcontains $HostName)
+        }
+      } catch {
+        Write-BrowserNativeHostStep "Ignoring invalid Chrome v2 manifest before rebuilding: $manifestPath"
+      }
+    }
+
+    $document = [ordered]@{
+      schemaVersion = 2
+      entries = @($entries) + @($resource)
+    }
+    Write-BrowserNativeHostUtf8NoBomAtomically $manifestPath ($document | ConvertTo-Json -Depth 12)
+    if (-not (Test-ChromeNativeHostV2Manifest `
+        $manifestPath `
+        $ExtensionIds `
+        $HostName `
+        $AppVersion `
+        $PluginVersion `
+        $BrowserClientPath `
+        $ExtensionHostPath `
+        $CodexCliPath `
+        $CodexHomePath `
+        $NodePath `
+        $NodeModuleDirs `
+        $NodeReplPath `
+        $ResourcesPath)) {
+      throw "Chrome native host v2 manifest post-write verification failed: $manifestPath"
+    }
+    $changedCount++
+  }
+
+  Write-BrowserNativeHostStep "Chrome native host v2 manifests verified: changed=$changedCount."
+  return $changedCount
+}
+
+function New-BrowserNativeHostRollbackBackup(
+  [string]$BackupRoot,
+  [string[]]$FilePaths,
+  [string]$RegistryPath
+) {
+  $backupDirectory = Join-Path $BackupRoot ((Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssfffZ') + '-' + [guid]::NewGuid().ToString('N'))
+  New-Item -ItemType Directory -Force -Path $backupDirectory | Out-Null
+
+  $fileSnapshots = New-Object System.Collections.Generic.List[object]
+  $index = 0
+  foreach ($filePath in @($FilePaths)) {
+    $exists = Test-Path -LiteralPath $filePath -PathType Leaf
+    $backupPath = if ($exists) {
+      Join-Path $backupDirectory ('file-{0:D2}.bin' -f $index)
+    } else {
+      $null
+    }
+    if ($exists) {
+      Copy-Item -LiteralPath $filePath -Destination $backupPath -Force
+      if ((Get-FileHash -LiteralPath $filePath -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $backupPath -Algorithm SHA256).Hash) {
+        throw "Browser native-host rollback backup hash mismatch: $filePath"
+      }
+    }
+    $fileSnapshots.Add([pscustomobject]@{
+        TargetPath = $filePath
+        Existed = [bool]$exists
+        BackupPath = $backupPath
+      })
+    $index++
+  }
+
+  $registryKeyExisted = Test-Path -LiteralPath $RegistryPath
+  $registryDefaultExisted = $false
+  $registryDefaultValue = $null
+  if ($registryKeyExisted) {
+    try {
+      $registryDefaultValue = (Get-ItemProperty -LiteralPath $RegistryPath -Name '(default)' -ErrorAction Stop).'(default)'
+      $registryDefaultExisted = $true
+    } catch {
+      $registryDefaultValue = $null
+    }
+  }
+
+  $snapshot = [pscustomobject]@{
+    BackupDirectory = $backupDirectory
+    Files = $fileSnapshots.ToArray()
+    RegistryPath = $RegistryPath
+    RegistryKeyExisted = [bool]$registryKeyExisted
+    RegistryDefaultExisted = [bool]$registryDefaultExisted
+    RegistryDefaultValue = $registryDefaultValue
+  }
+  $metadataPath = Join-Path $backupDirectory 'rollback.json'
+  [System.IO.File]::WriteAllText(
+    $metadataPath,
+    ($snapshot | ConvertTo-Json -Depth 8),
+    [System.Text.UTF8Encoding]::new($false)
+  )
+  return $snapshot
+}
+
+function Restore-BrowserNativeHostRollbackBackup($Snapshot) {
+  foreach ($fileSnapshot in @($Snapshot.Files)) {
+    $targetPath = [string]$fileSnapshot.TargetPath
+    if ([bool]$fileSnapshot.Existed) {
+      $targetDirectory = Split-Path -Parent $targetPath
+      New-Item -ItemType Directory -Force -Path $targetDirectory | Out-Null
+      $temporary = Join-Path $targetDirectory ('.{0}.restore.{1}.tmp' -f (Split-Path -Leaf $targetPath), ([guid]::NewGuid().ToString('N')))
+      $superseded = Join-Path $targetDirectory ('.{0}.restore.{1}.bak' -f (Split-Path -Leaf $targetPath), ([guid]::NewGuid().ToString('N')))
+      try {
+        Copy-Item -LiteralPath ([string]$fileSnapshot.BackupPath) -Destination $temporary -Force
+        if (Test-Path -LiteralPath $targetPath -PathType Leaf) {
+          [System.IO.File]::Replace($temporary, $targetPath, $superseded)
+        } else {
+          [System.IO.File]::Move($temporary, $targetPath)
+        }
+      } finally {
+        Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $superseded -Force -ErrorAction SilentlyContinue
+      }
+      if ((Get-FileHash -LiteralPath $targetPath -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath ([string]$fileSnapshot.BackupPath) -Algorithm SHA256).Hash) {
+        throw "Browser native-host rollback restore hash mismatch: $targetPath"
+      }
+    } elseif (Test-Path -LiteralPath $targetPath -PathType Leaf) {
+      Remove-Item -LiteralPath $targetPath -Force
+    }
+  }
+
+  $registryPath = [string]$Snapshot.RegistryPath
+  if ([bool]$Snapshot.RegistryKeyExisted) {
+    New-Item -Path $registryPath -Force | Out-Null
+    if ([bool]$Snapshot.RegistryDefaultExisted) {
+      Set-Item -LiteralPath $registryPath -Value $Snapshot.RegistryDefaultValue
+    } else {
+      Remove-ItemProperty -LiteralPath $registryPath -Name '(default)' -Force -ErrorAction SilentlyContinue
+    }
+  } elseif (Test-Path -LiteralPath $registryPath) {
+    Remove-Item -LiteralPath $registryPath -Force
+  }
+}
