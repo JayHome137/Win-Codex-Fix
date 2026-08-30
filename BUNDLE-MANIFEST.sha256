@@ -3,7 +3,7 @@
 e1262b53c9790beb9ab1788be1a30a017ae83d4b6e27b2644b21307e36cf3b49  ./README.md
 439426b1f472bad1850c5d3f3f97701e493d5cf1d3de45abc70ccf3f18498f83  ./SKILL.md
 33287adb5dbec82988df4b75cd0f8ef8b6878bb5dcccb8cd6d873fead57c2f9a  ./agents/openai.yaml
-7e9288d67161b85052d73b2c5a4173c65bfdc3e4bb3160f74e576ff60f0a0fb5  ./deploy/Install-FastRepair.ps1
+9fdbb3dc3298cfc748b9e1459c74d3e980bf910d66b2cb57d86b14d49b801fcb  ./deploy/Install-FastRepair.ps1
 fff19b6e683722917e47608ad55ca3092e3df0dd88164761f72cf6e363cb0c99  ./docs/quick-repair.md
 4c5d8453203c276de0df9b262b716d630f47d16d5e864b1c4da4d96fba958669  ./scripts/BrowserNativeHost.ps1
 efc0817b49aefdfcf6b5b673793b41cba57f223185a7e1fecd2dff6664e6fb66  ./scripts/ChromeOpaqueTextMaterialization.ps1

@@ -82,6 +82,8 @@ $obsolete = @(
   'scripts\Start-CodexDesktopBundledHealthCheckContinuation.ps1',
   'scripts\Repair-CodexDesktopBundled.ps1.pair-candidate.ps1',
   'scripts\Verify-CodexDesktopBundled.ps1.pair-candidate.ps1',
+  'scripts\Get-CodexDesktopFirstLaunchDiagnostic.ps1',
+  'tests\Test-UpdateFirstLaunchDiagnostic.ps1',
   'scripts\ChromeOpaqueTextMaterialization.ps1.pre-appx-peer-anchor-20260803'
 )
 $obsolete += @(Get-ChildItem -LiteralPath (Join-Path $ProjectRoot 'scripts') -File -ErrorAction SilentlyContinue |
