@@ -51,7 +51,6 @@ $projectFiles = @(
   'deploy\Install-FastRepair.ps1',
   'agents\openai.yaml',
   'scripts\BrowserNativeHost.ps1',
-  'scripts\Get-CodexDesktopFirstLaunchDiagnostic.ps1',
   'scripts\ChromeOpaqueTextMaterialization.ps1',
   'scripts\Invoke-CodexDesktopQuickRepair.ps1',
   'scripts\Start-CodexDesktopQuickRepairAfterExit.ps1',
@@ -66,7 +65,6 @@ $projectFiles = @(
   'tests\Test-ChromeAppxBootstrap.ps1',
   'tests\Test-ComputerUseCache.ps1',
   'tests\Test-EdgeNativeHost.ps1',
-  'tests\Test-UpdateFirstLaunchDiagnostic.ps1',
   'docs\quick-repair.md'
 )
 foreach ($relative in $projectFiles) { Copy-StageFile $relative $ProjectRoot }

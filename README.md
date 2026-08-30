@@ -125,7 +125,6 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File .\deploy\Install-FastRepair.ps
 | `EdgeNativeHostOnly` | 仅在 Edge profile 已安装目标扩展且 Edge 专用 HKCU 注册表键缺失/漂移时补齐映射；不改 Chrome 或共享 manifest |
 | `ChromeAppxBootstrapOnly` | 不经过 marketplace，直接用当前 AppX Chrome 和官方 `installManifest.mjs` 重建 Chrome cache、sidecar、legacy/v2 manifest 与 HKCU 映射 |
 | `ComputerUseCacheOnly` | 不经过 marketplace，直接用当前 AppX 同步 Computer Use 插件 cache 与发现链接；不修改 `cua_node` 运行时 |
-| `UpdateFirstLaunchDiagnosticOnly` | 更新后无窗口时只读识别 runtime materialization、update-policy 等待或未知 headless，不重启、不轮询 |
 | `TmpRuntimeMarketplaceOnly` | 只处理已确认的旧临时 marketplace junction |
 | `Verify` | 只运行 Quick verifier，不写入 |
 

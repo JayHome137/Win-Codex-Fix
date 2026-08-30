@@ -1,5 +1,5 @@
 param(
-  [ValidateSet('Auto','CliMirrorOnly','RuntimeOnly','BrowserDiscoveryOnly','BrowserCacheOnly','BrowserNativeHostOnly','EdgeNativeHostOnly','ChromeAppxBootstrapOnly','ComputerUseCacheOnly','UpdateFirstLaunchDiagnosticOnly','TmpRuntimeMarketplaceOnly','Verify')]
+  [ValidateSet('Auto','CliMirrorOnly','RuntimeOnly','BrowserDiscoveryOnly','BrowserCacheOnly','BrowserNativeHostOnly','EdgeNativeHostOnly','ChromeAppxBootstrapOnly','ComputerUseCacheOnly','TmpRuntimeMarketplaceOnly','Verify')]
   [string]$Route = 'Auto',
   [switch]$ArmAfterExit,
   [string]$ProjectRoot = ''
@@ -14,7 +14,6 @@ $Scripts = Join-Path $Root 'scripts'
 $Repair = Join-Path $Scripts 'Repair-CodexDesktopBundled.ps1'
 $Verify = Join-Path $Scripts 'Verify-CodexDesktopBundled.ps1'
 $AfterExit = Join-Path $Scripts 'Start-CodexDesktopQuickRepairAfterExit.ps1'
-$FirstLaunchDiagnostic = Join-Path $Scripts 'Get-CodexDesktopFirstLaunchDiagnostic.ps1'
 
 function Invoke-Child([string]$Path, [string[]]$Arguments) {
   if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
@@ -65,9 +64,6 @@ function Invoke-VerifyEdgeNativeHost {
 }
 
 if ($ArmAfterExit) {
-  if ($Route -eq 'UpdateFirstLaunchDiagnosticOnly') {
-    throw 'UpdateFirstLaunchDiagnosticOnly is read-only and cannot arm an after-exit task.'
-  }
   if (-not (Test-Path -LiteralPath $AfterExit -PathType Leaf)) {
     throw "Missing one-shot after-exit helper: $AfterExit"
   }
@@ -87,7 +83,6 @@ function Invoke-Target([string]$Target) {
     'EdgeNativeHostOnly' { return Invoke-Child $Repair @('-EdgeNativeHostOnly') }
     'ChromeAppxBootstrapOnly' { return Invoke-Child $Repair @('-ChromeAppxBootstrapOnly') }
     'ComputerUseCacheOnly' { return Invoke-Child $Repair @('-ComputerUseCacheOnly') }
-    'UpdateFirstLaunchDiagnosticOnly' { return Invoke-Child $FirstLaunchDiagnostic @() }
     'TmpRuntimeMarketplaceOnly' { return Invoke-Child $Repair @('-TmpRuntimeMarketplaceOnly') }
     'Verify' { return (Invoke-VerifyQuick).Code }
     default { throw "Unsupported quick repair route: $Target" }

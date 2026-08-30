@@ -19,7 +19,6 @@ description: Windows Codex Desktop 更新后的快速、一次性热修。按验
 - `EdgeNativeHostOnly`：仅在当前 Edge profile 确实安装了目标扩展、且 Edge 专用 HKCU NativeMessagingHosts 键缺失或漂移时，单独补齐 Edge 注册表映射；不改 Chrome 键、共享 manifest、缓存、runtime 或进程。
 - `ChromeAppxBootstrapOnly`：绕过已保留的 `openai-bundled` marketplace 名称，直接从当前 AppX 物化 Chrome cache，并调用 AppX 自带的 `installManifest.mjs` 重建 sidecar、legacy manifest、HKCU 映射，再更新 v2 manifest；不触碰 Browser/Computer Use cache，不关闭 Codex、Chrome 或 Edge。
 - `ComputerUseCacheOnly`：绕过 marketplace，直接从当前 AppX 同步 Computer Use 插件 cache 与发现链接；不修改 `cua_node` 运行时、配置或其它插件。
-- `UpdateFirstLaunchDiagnosticOnly`：更新后只有后台进程、没有窗口时，快速区分 runtime 正在 materialize、update-policy 等待、正常启动中或未知 headless；只读，不等待数分钟，不关闭或重启进程。
 - `TmpRuntimeMarketplaceOnly`：只修复已确认的旧临时 marketplace 所有权问题。
 - `Verify`：只运行一次 Quick verifier。
 
