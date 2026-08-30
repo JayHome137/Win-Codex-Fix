@@ -4,6 +4,8 @@ param(
   [switch]$BrowserDiscoveryOnly,
   [switch]$BrowserCacheOnly,
   [switch]$BrowserNativeHostOnly,
+  [switch]$ChromeAppxBootstrapOnly,
+  [switch]$ComputerUseCacheOnly,
   [switch]$TmpRuntimeMarketplaceOnly,
   [switch]$AutomaticPostUpdate,
   [string]$ExpectedPackageFullName = ''
@@ -27,10 +29,10 @@ if (-not (Test-Path -LiteralPath $BrowserNativeHostLibrary -PathType Leaf)) {
 . $BrowserNativeHostLibrary
 
 $selectedTargetedModes = @(
-  @($CliMirrorOnly, $RuntimeOnly, $BrowserDiscoveryOnly, $BrowserCacheOnly, $BrowserNativeHostOnly, $TmpRuntimeMarketplaceOnly) | Where-Object { $_ }
+  @($CliMirrorOnly, $RuntimeOnly, $BrowserDiscoveryOnly, $BrowserCacheOnly, $BrowserNativeHostOnly, $ChromeAppxBootstrapOnly, $ComputerUseCacheOnly, $TmpRuntimeMarketplaceOnly) | Where-Object { $_ }
 )
 if ($selectedTargetedModes.Count -gt 1) {
-  throw 'Choose only one targeted repair mode: -CliMirrorOnly, -RuntimeOnly, -BrowserDiscoveryOnly, -BrowserCacheOnly, -BrowserNativeHostOnly, or -TmpRuntimeMarketplaceOnly.'
+  throw 'Choose only one targeted repair mode: -CliMirrorOnly, -RuntimeOnly, -BrowserDiscoveryOnly, -BrowserCacheOnly, -BrowserNativeHostOnly, -ChromeAppxBootstrapOnly, -ComputerUseCacheOnly, or -TmpRuntimeMarketplaceOnly.'
 }
 if ($AutomaticPostUpdate -and $selectedTargetedModes.Count -gt 0) {
   throw '-AutomaticPostUpdate cannot be combined with a targeted repair mode.'
@@ -592,6 +594,15 @@ function Test-BrowserDiscoveryJunction([string]$Path, [string]$ExpectedTarget) {
     (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq 0) -or
     ([string]$item.LinkType -ne 'Junction')
   ) {
+    return $false
+  }
+
+  # A junction can retain the expected target string while its reparse point
+  # is not actually traversable (Windows returns ERROR_NOT_A_MOUNT_POINT).
+  # Probe the link itself so a stale target is not reported as healthy.
+  try {
+    $null = Get-ChildItem -LiteralPath $Path -Force -ErrorAction Stop | Select-Object -First 1
+  } catch {
     return $false
   }
 
@@ -1804,6 +1815,11 @@ function Test-LatestIsStable([string]$LatestPath, [string]$VersionDir) {
 
   $item = Get-Item -LiteralPath $LatestPath -Force
   if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+    try {
+      $null = Get-ChildItem -LiteralPath $LatestPath -Force -ErrorAction Stop | Select-Object -First 1
+    } catch {
+      return $false
+    }
     $targets = @($item.Target)
     if ($targets.Count -eq 0) {
       return $false
@@ -2363,6 +2379,128 @@ function Remove-LegacyBundledRepairTasks {
   }
 }
 
+function Test-PlainTreeEqual([string]$LeftRoot, [string]$RightRoot, [string[]]$AllowedRightExtraFiles = @()) {
+  try {
+    $left = Get-BrowserCacheTreeInventory $LeftRoot
+    $right = Get-BrowserCacheTreeInventory $RightRoot
+    if (
+      (-not $left.Exists) -or (-not $right.Exists) -or
+      (-not $left.IsDirectory) -or (-not $right.IsDirectory) -or
+      $left.IsReparsePoint -or $right.IsReparsePoint -or
+      @($left.ReparsePaths).Count -gt 0 -or @($right.ReparsePaths).Count -gt 0
+    ) {
+      return $false
+    }
+
+    $leftFiles = @($left.Files.Keys | Sort-Object)
+    $rightFiles = @($right.Files.Keys | Where-Object { $_ -notin @($AllowedRightExtraFiles) } | Sort-Object)
+    if (-not (Test-ExactStringArray $leftFiles $rightFiles)) {
+      return $false
+    }
+    foreach ($relative in $leftFiles) {
+      if (
+        [int64]$left.Files[$relative].Length -ne [int64]$right.Files[$relative].Length -or
+        [string]$left.Files[$relative].SHA256 -ne [string]$right.Files[$relative].SHA256
+      ) {
+        return $false
+      }
+    }
+
+    return (
+      (Test-ExactStringArray @($left.Directories.Keys | Sort-Object) @($right.Directories.Keys | Sort-Object)) -and
+      (@($right.Files.Keys | Where-Object { $_ -in @($AllowedRightExtraFiles) }).Count -le @($AllowedRightExtraFiles).Count)
+    )
+  } catch {
+    return $false
+  }
+}
+
+function Get-ChromeAppxBootstrapBlockers([string]$ChromeRoot) {
+  $prefix = $ChromeRoot.TrimEnd('\') + '\'
+  try {
+    $processes = @(Get-CimInstance Win32_Process -ErrorAction Stop)
+  } catch {
+    throw "ChromeAppxBootstrapOnly process inventory unavailable: $($_.Exception.Message)"
+  }
+
+  $blockers = New-Object System.Collections.Generic.List[object]
+  foreach ($process in $processes) {
+    $name = [string]$process.Name
+    $path = [string]$process.ExecutablePath
+    $commandLine = [string]$process.CommandLine
+    $isManaged = $false
+    $reason = $null
+    if ($name -ieq 'extension-host.exe' -and $path -and $path.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+      $isManaged = $true
+      $reason = 'bundled Chrome extension host'
+    } elseif ($name -iin @('node.exe', 'node_repl.exe')) {
+      if ($path -and $path.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+        $isManaged = $true
+        $reason = 'Chrome cache runtime'
+      } elseif ($commandLine -and $commandLine -match '(?i)browser-client\.mjs') {
+        $isManaged = $true
+        $reason = 'Chrome browser client runtime'
+      }
+    }
+
+    if ($isManaged) {
+      $blockers.Add([pscustomobject]@{
+          ProcessId = [int]$process.ProcessId
+          Name = $name
+          Reason = $reason
+        })
+    }
+  }
+  return @($blockers.ToArray())
+}
+
+function Assert-ChromeAppxBootstrapProcessQuiescence([string]$ChromeRoot) {
+  $blockers = @(Get-ChromeAppxBootstrapBlockers $ChromeRoot)
+  if ($blockers.Count -gt 0) {
+    $detail = @($blockers | ForEach-Object { "$($_.Name)#$($_.ProcessId): $($_.Reason)" }) -join '; '
+    throw "ChromeAppxBootstrapOnly process guard blocked cache/manifest modification: $detail"
+  }
+}
+
+function Invoke-ChromeAppxOfficialManifestInstall(
+  [string]$NodePath,
+  [string]$InstallScript,
+  [string]$CodexCliPath,
+  [string]$NodeReplPath
+) {
+  if (-not (Test-Path -LiteralPath $NodePath -PathType Leaf)) {
+    throw "ChromeAppxBootstrapOnly could not find Node runtime: $NodePath"
+  }
+  if (-not (Test-Path -LiteralPath $InstallScript -PathType Leaf)) {
+    throw "ChromeAppxBootstrapOnly could not find the AppX official manifest installer: $InstallScript"
+  }
+
+  $runtimeJson = [ordered]@{
+    codexCliPath = $CodexCliPath
+    nodePath = $NodePath
+    nodeReplPath = $NodeReplPath
+  } | ConvertTo-Json -Compress
+  $runtime = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($runtimeJson))
+  $js = @'
+import { pathToFileURL } from 'node:url';
+const scriptPath = process.argv[1];
+const runtime = JSON.parse(Buffer.from(process.argv[2], 'base64').toString('utf8'));
+try {
+  const module = await import(pathToFileURL(scriptPath).href);
+  await module.install({ appServerRuntimePaths: runtime });
+} catch (error) {
+  console.error(error && error.stack ? error.stack : String(error));
+  process.exitCode = 1;
+}
+'@
+  $output = @(& $NodePath '--input-type=module' '-e' $js $InstallScript $runtime 2>&1)
+  foreach ($line in $output) { Write-Step ([string]$line) }
+  $exitCode = if ($null -eq $LASTEXITCODE) { 0 } else { [int]$LASTEXITCODE }
+  if ($exitCode -ne 0) {
+    throw "AppX official Chrome manifest installer failed with exit=$exitCode"
+  }
+}
+
 $CodexHome = Join-Path $env:USERPROFILE '.codex'
 $BackupRoot = if ($env:CODEX_REPAIR_BACKUP_ROOT) {
   $env:CODEX_REPAIR_BACKUP_ROOT
@@ -2413,6 +2551,149 @@ if ($CliMirrorOnly) {
   }
 
   Write-Step "CLI-mirror-only synchronization complete: $($result.Status)"
+  exit 0
+}
+
+if ($ChromeAppxBootstrapOnly) {
+  Write-Step 'Starting direct AppX Chrome bootstrap; marketplace registration is not used.'
+
+  $currentPackage = Get-AppxPackage -Name 'OpenAI.Codex' -ErrorAction SilentlyContinue |
+    Sort-Object Version -Descending |
+    Select-Object -First 1
+  if (-not $currentPackage) {
+    throw 'ChromeAppxBootstrapOnly could not resolve the current registered Codex AppX package.'
+  }
+
+  $installLocation = [string]$currentPackage.InstallLocation
+  $bundledSource = Join-Path $installLocation 'app\resources\plugins\openai-bundled'
+  if (-not (Test-Path -LiteralPath $bundledSource -PathType Container)) {
+    throw 'ChromeAppxBootstrapOnly could not resolve the AppX bundled source.'
+  }
+  if (-not (Test-AppxBlockMapTreeComplete $installLocation $bundledSource 'app\resources\plugins\openai-bundled\')) {
+    throw 'ChromeAppxBootstrapOnly stopped: AppX bundled source failed AppxBlockMap validation.'
+  }
+
+  $chromeSource = Join-Path $bundledSource 'plugins\chrome'
+  if (-not (Test-AppxBlockMapTreeComplete $installLocation $chromeSource 'app\resources\plugins\openai-bundled\plugins\chrome\')) {
+    throw 'ChromeAppxBootstrapOnly stopped: AppX Chrome source failed AppxBlockMap validation.'
+  }
+  $chromeVersion = Get-PluginVersion $chromeSource
+  $chromeRoot = Join-Path $PluginCacheRoot 'chrome'
+  foreach ($linkName in @('latest', '.codex-plugin', 'assets', 'docs', 'extension-host', 'scripts', 'skills')) {
+    Assert-BrowserDiscoveryJunctionReplaceable "Chrome $linkName" (Join-Path $chromeRoot $linkName)
+  }
+  $existingChromeVersion = Get-Item -LiteralPath (Join-Path $chromeRoot $chromeVersion) -Force -ErrorAction SilentlyContinue
+  if ($existingChromeVersion -and (($existingChromeVersion.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)) {
+    throw "ChromeAppxBootstrapOnly requires an ordinary version directory: $($existingChromeVersion.FullName)"
+  }
+  Assert-ChromeAppxBootstrapProcessQuiescence $chromeRoot
+
+  $identity = Get-ChromiumNativeHostIdentity $chromeSource
+  $chromeVersionRoot = Join-Path $chromeRoot $chromeVersion
+  $chromeLatestRoot = Join-Path $chromeRoot 'latest'
+  $browserClientPath = Join-Path $chromeVersionRoot 'scripts\browser-client.mjs'
+  $extensionHostPath = Join-Path $chromeVersionRoot 'extension-host\windows\x64\extension-host.exe'
+  $sidecarPath = Join-Path $chromeLatestRoot 'extension-host\windows\x64\extension-host-config.json'
+  $legacyManifestPath = Join-Path $OpenAILocal 'extension\com.openai.codexextension.json'
+  $v2ManifestPaths = @(
+    (Join-Path $OpenAILocal 'Codex\chrome-native-hosts-v2.json'),
+    (Join-Path $CodexHome 'chrome-native-hosts-v2.json')
+  )
+  $registryPath = "Registry::HKEY_CURRENT_USER\Software\Google\Chrome\NativeMessagingHosts\$($identity.HostName)"
+  $linkSnapshots = @(
+    foreach ($linkName in @('latest', '.codex-plugin', 'assets', 'docs', 'extension-host', 'scripts', 'skills')) {
+      Get-BrowserDiscoveryLinkSnapshot (Join-Path $chromeRoot $linkName)
+    }
+  )
+  $rollback = New-BrowserNativeHostRollbackBackup `
+    (Join-Path $RepairRoot 'archives\browser-native-host-backups') `
+    (@($legacyManifestPath) + @($v2ManifestPaths) + @($sidecarPath)) `
+    $registryPath
+
+  try {
+    $cacheChanged = 0
+    $chromeRequired = @('scripts\browser-client.mjs', 'extension-host\windows\x64\extension-host.exe', 'assets\google-chrome.png', '.codex-plugin\plugin.json')
+    if (-not (Test-PluginCache $chromeRoot $chromeVersion $chromeRequired) -or
+        -not (Test-PlainTreeEqual $chromeSource (Join-Path $chromeRoot $chromeVersion) @('extension-host\windows\x64\extension-host-config.json'))) {
+      Repair-PluginCache 'chrome' $bundledSource $PluginCacheRoot @('.codex-plugin', 'assets', 'docs', 'extension-host', 'scripts', 'skills') | Out-Null
+      $cacheChanged++
+    }
+
+  $runtimeBin = Get-CurrentCuaRuntimeBin $ConfigPath
+  if (-not (Test-CuaRuntime $runtimeBin)) {
+    throw 'ChromeAppxBootstrapOnly requires an existing readable cua_node runtime; use RuntimeOnly for that owner.'
+  }
+
+  $codexCliPath = Join-Path $RepairRoot 'state\codex-cli\codex.exe'
+  if (-not (Test-Path -LiteralPath $codexCliPath -PathType Leaf)) {
+    throw 'ChromeAppxBootstrapOnly requires the current CLI mirror.'
+  }
+  $codexCliSource = Find-CurrentCodexCli
+  if (-not $codexCliSource) {
+    throw 'ChromeAppxBootstrapOnly could not resolve the current AppX CLI.'
+  }
+  Assert-CodexCliMirrorMatchesCurrent $codexCliSource $codexCliPath
+  $nodePath = Join-Path $runtimeBin 'node.exe'
+  $nodeReplPath = Join-Path $runtimeBin 'node_repl.exe'
+  $installScript = Join-Path (Join-Path $chromeRoot $chromeVersion) 'scripts\installManifest.mjs'
+  $resourcesPath = Join-Path $installLocation 'app\resources'
+  $registryValue = $null
+  try { $registryValue = (Get-ItemProperty -LiteralPath $registryPath -Name '(default)' -ErrorAction Stop).'(default)' } catch { }
+  $needsOfficialInstall = (
+    -not (Test-ChromeExtensionHostSidecar $sidecarPath (Join-Path $chromeLatestRoot 'scripts\browser-client.mjs') $codexCliPath $nodePath $nodeReplPath) -or
+    -not (Test-ChromiumNativeHostManifest $legacyManifestPath $identity @($extensionHostPath, (Join-Path $chromeLatestRoot 'extension-host\windows\x64\extension-host.exe'))) -or
+    -not (Test-WindowsPathEqual ([string]$registryValue) $legacyManifestPath)
+  )
+  if ($needsOfficialInstall) {
+    Invoke-ChromeAppxOfficialManifestInstall $nodePath $installScript $codexCliPath $nodeReplPath
+  } else {
+    Write-Step 'AppX official Chrome manifest installer state is already current; skipping rewrite.'
+  }
+
+  if (-not (Test-ChromeExtensionHostSidecar $sidecarPath (Join-Path $chromeLatestRoot 'scripts\browser-client.mjs') $codexCliPath $nodePath $nodeReplPath)) {
+    throw "ChromeAppxBootstrapOnly official installer did not produce a valid sidecar: $sidecarPath"
+  }
+
+  if (-not (Test-ChromiumNativeHostManifest $legacyManifestPath $identity @($extensionHostPath, (Join-Path $chromeLatestRoot 'extension-host\windows\x64\extension-host.exe')))) {
+    throw 'ChromeAppxBootstrapOnly official installer did not produce a valid legacy native-host manifest.'
+  }
+  $registryValue = (Get-ItemProperty -LiteralPath $registryPath -Name '(default)' -ErrorAction Stop).'(default)'
+  if (-not (Test-WindowsPathEqual ([string]$registryValue) $legacyManifestPath)) {
+    throw 'ChromeAppxBootstrapOnly official installer did not update the Chrome registry mapping.'
+  }
+
+  $changedManifestCount = Ensure-ChromeNativeHostV2Manifest `
+    $CodexHome `
+    @($identity.ExtensionIds) `
+    ([string]$identity.HostName) `
+    ([string]$currentPackage.Version) `
+    $chromeVersion `
+    $browserClientPath `
+    $extensionHostPath `
+    $codexCliPath `
+    (Join-Path $runtimeBin 'node.exe') `
+    (Join-Path $runtimeBin 'node_modules') `
+    (Join-Path $runtimeBin 'node_repl.exe') `
+    $resourcesPath
+
+  foreach ($manifestPath in @($v2ManifestPaths)) {
+    if (-not (Test-ChromeNativeHostV2Manifest $manifestPath @($identity.ExtensionIds) ([string]$identity.HostName) ([string]$currentPackage.Version) $chromeVersion $browserClientPath $extensionHostPath $codexCliPath $CodexHome (Join-Path $runtimeBin 'node.exe') (Join-Path $runtimeBin 'node_modules') (Join-Path $runtimeBin 'node_repl.exe') $resourcesPath)) {
+      throw "ChromeAppxBootstrapOnly v2 manifest post-write verification failed: $manifestPath"
+    }
+  }
+
+  } catch {
+    $repairError = $_
+    try {
+      Restore-BrowserNativeHostRollbackBackup $rollback
+      foreach ($snapshot in @($linkSnapshots)) { Restore-BrowserDiscoveryLinkSnapshot $snapshot }
+    } catch {
+      throw "$($repairError.Exception.Message) ChromeAppxBootstrapOnly rollback failed: $($_.Exception.Message); backup=$($rollback.BackupDirectory)"
+    }
+    throw "$($repairError.Exception.Message) ChromeAppxBootstrapOnly restored persistent manifests and discovery links from $($rollback.BackupDirectory)."
+  }
+
+  Write-Step "Direct AppX Chrome bootstrap complete: AppX=$($currentPackage.Version), Chrome=$chromeVersion, cacheChanges=$cacheChanged, v2ManifestChanges=$changedManifestCount, rollbackBackup=$($rollback.BackupDirectory). No marketplace registration or process restart was used."
   exit 0
 }
 
@@ -2578,6 +2859,64 @@ if ($BrowserNativeHostOnly) {
 
   $backupDetail = if ($rollback) { "; rollbackBackup=$($rollback.BackupDirectory)" } else { '' }
   Write-Step "Targeted Browser native-host repair complete: schema=$($identity.Schema), extensionIds=$(@($identity.ExtensionIds).Count), directChanges=$changed$backupDetail. No process was stopped or restarted."
+  exit 0
+}
+
+if ($ComputerUseCacheOnly) {
+  Write-Step 'Starting direct AppX Computer Use plugin-cache repair; marketplace registration and cua_node runtime remain untouched.'
+
+  $currentPackage = Get-AppxPackage -Name 'OpenAI.Codex' -ErrorAction SilentlyContinue |
+    Sort-Object Version -Descending |
+    Select-Object -First 1
+  if (-not $currentPackage) {
+    throw 'ComputerUseCacheOnly could not resolve the current registered Codex AppX package.'
+  }
+
+  $installLocation = [string]$currentPackage.InstallLocation
+  $bundledSource = Join-Path $installLocation 'app\resources\plugins\openai-bundled'
+  $computerUseSource = Join-Path $bundledSource 'plugins\computer-use'
+  if (-not (Test-AppxBlockMapTreeComplete $installLocation $computerUseSource 'app\resources\plugins\openai-bundled\plugins\computer-use\')) {
+    throw 'ComputerUseCacheOnly stopped: AppX Computer Use source failed AppxBlockMap validation.'
+  }
+
+  $computerUseVersion = Get-PluginVersion $computerUseSource
+  $computerUseRoot = Join-Path $PluginCacheRoot 'computer-use'
+  $computerUseVersionRoot = Join-Path $computerUseRoot $computerUseVersion
+  foreach ($linkName in @('latest', '.codex-plugin', 'assets', 'docs', 'skills')) {
+    Assert-BrowserDiscoveryJunctionReplaceable "Computer Use $linkName" (Join-Path $computerUseRoot $linkName)
+  }
+  $existingVersion = Get-Item -LiteralPath $computerUseVersionRoot -Force -ErrorAction SilentlyContinue
+  if ($existingVersion -and (($existingVersion.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)) {
+    throw "ComputerUseCacheOnly requires an ordinary version directory: $computerUseVersionRoot"
+  }
+
+  $required = @(
+    '.codex-plugin\plugin.json',
+    'assets\app-icon.png',
+    'docs\api.md',
+    'docs\confirmations.md',
+    'docs\guidance.md',
+    'skills\computer-use\SKILL.md'
+  )
+  $changed = 0
+  if (
+    -not (Test-PluginCache $computerUseRoot $computerUseVersion $required) -or
+    -not (Test-PluginMetadataLink $computerUseRoot $computerUseVersion) -or
+    -not (Test-PlainTreeEqual $computerUseSource $computerUseVersionRoot)
+  ) {
+    Repair-PluginCache 'computer-use' $bundledSource $PluginCacheRoot @('.codex-plugin', 'assets', 'docs', 'skills') | Out-Null
+    $changed = 1
+  }
+
+  if (
+    -not (Test-PluginCache $computerUseRoot $computerUseVersion $required) -or
+    -not (Test-PluginMetadataLink $computerUseRoot $computerUseVersion) -or
+    -not (Test-PlainTreeEqual $computerUseSource $computerUseVersionRoot)
+  ) {
+    throw 'ComputerUseCacheOnly post-write verification failed.'
+  }
+
+  Write-Step "Direct AppX Computer Use cache repair complete: AppX=$($currentPackage.Version), plugin=$computerUseVersion, changed=$changed."
   exit 0
 }
 

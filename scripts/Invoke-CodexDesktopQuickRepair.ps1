@@ -1,5 +1,5 @@
 param(
-  [ValidateSet('Auto','CliMirrorOnly','RuntimeOnly','BrowserDiscoveryOnly','BrowserCacheOnly','BrowserNativeHostOnly','UpdateFirstLaunchDiagnosticOnly','TmpRuntimeMarketplaceOnly','Verify')]
+  [ValidateSet('Auto','CliMirrorOnly','RuntimeOnly','BrowserDiscoveryOnly','BrowserCacheOnly','BrowserNativeHostOnly','ChromeAppxBootstrapOnly','ComputerUseCacheOnly','UpdateFirstLaunchDiagnosticOnly','TmpRuntimeMarketplaceOnly','Verify')]
   [string]$Route = 'Auto',
   [switch]$ArmAfterExit,
   [string]$ProjectRoot = ''
@@ -43,6 +43,20 @@ function Invoke-VerifyBrowserNativeHost {
   return [pscustomobject]@{ Code = $code; Text = ($output -join "`n") }
 }
 
+function Invoke-VerifyChromeAppxBootstrap {
+  $output = @(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Verify -ChromeAppxBootstrapOnly 2>&1)
+  $code = if ($null -eq $LASTEXITCODE) { 0 } else { [int]$LASTEXITCODE }
+  foreach ($line in $output) { Write-Host $line }
+  return [pscustomobject]@{ Code = $code; Text = ($output -join "`n") }
+}
+
+function Invoke-VerifyComputerUseCache {
+  $output = @(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Verify -ComputerUseCacheOnly 2>&1)
+  $code = if ($null -eq $LASTEXITCODE) { 0 } else { [int]$LASTEXITCODE }
+  foreach ($line in $output) { Write-Host $line }
+  return [pscustomobject]@{ Code = $code; Text = ($output -join "`n") }
+}
+
 if ($ArmAfterExit) {
   if ($Route -eq 'UpdateFirstLaunchDiagnosticOnly') {
     throw 'UpdateFirstLaunchDiagnosticOnly is read-only and cannot arm an after-exit task.'
@@ -63,6 +77,8 @@ function Invoke-Target([string]$Target) {
     'BrowserDiscoveryOnly' { return Invoke-Child $Repair @('-BrowserDiscoveryOnly') }
     'BrowserCacheOnly' { return Invoke-Child $Repair @('-BrowserCacheOnly') }
     'BrowserNativeHostOnly' { return Invoke-Child $Repair @('-BrowserNativeHostOnly') }
+    'ChromeAppxBootstrapOnly' { return Invoke-Child $Repair @('-ChromeAppxBootstrapOnly') }
+    'ComputerUseCacheOnly' { return Invoke-Child $Repair @('-ComputerUseCacheOnly') }
     'UpdateFirstLaunchDiagnosticOnly' { return Invoke-Child $FirstLaunchDiagnostic @() }
     'TmpRuntimeMarketplaceOnly' { return Invoke-Child $Repair @('-TmpRuntimeMarketplaceOnly') }
     'Verify' { return (Invoke-VerifyQuick).Code }
@@ -72,10 +88,14 @@ function Invoke-Target([string]$Target) {
 
 if ($Route -ne 'Auto') {
   $targetResult = Invoke-Target $Route
-  if ($Route -in @('CliMirrorOnly','RuntimeOnly','BrowserDiscoveryOnly','BrowserCacheOnly','BrowserNativeHostOnly','TmpRuntimeMarketplaceOnly')) {
+  if ($Route -in @('CliMirrorOnly','RuntimeOnly','BrowserDiscoveryOnly','BrowserCacheOnly','BrowserNativeHostOnly','ChromeAppxBootstrapOnly','ComputerUseCacheOnly','TmpRuntimeMarketplaceOnly')) {
     if ($targetResult -eq 0) {
       $targetResult = if ($Route -eq 'BrowserNativeHostOnly') {
         (Invoke-VerifyBrowserNativeHost).Code
+      } elseif ($Route -eq 'ChromeAppxBootstrapOnly') {
+        (Invoke-VerifyChromeAppxBootstrap).Code
+      } elseif ($Route -eq 'ComputerUseCacheOnly') {
+        (Invoke-VerifyComputerUseCache).Code
       } else {
         (Invoke-VerifyQuick).Code
       }
@@ -84,7 +104,7 @@ if ($Route -ne 'Auto') {
   exit $targetResult
 }
 
-Write-Host '[codex-quick] one pass: mirror -> quick verifier -> one matching repair route'
+Write-Host '[codex-quick] one pass: mirror -> quick verifier -> one matching repair route -> route acceptance'
 $mirrorResult = Invoke-Target 'CliMirrorOnly'
 if ($mirrorResult -eq 30) {
   Write-Host '[codex-quick] pending-natural-exit: managed CLI mirror is in use; no process was stopped.'
@@ -105,6 +125,10 @@ $failureText = (($quick.Text -split "`n") | Where-Object { $_ -match '^\[FAIL\]'
 $selectedRoute = $null
 if ($failureText -match '(?i)code-mode-host|CLI mirror|codex-cli') {
   $selectedRoute = 'CliMirrorOnly'
+} elseif ($failureText -match '(?i)chrome latest|chrome metadata|chrome native|native host v2|extension-host-config') {
+  $selectedRoute = 'ChromeAppxBootstrapOnly'
+} elseif ($failureText -match '(?i)computer-use (?:plugin metadata|latest|metadata)|Computer Use plugin-cache') {
+  $selectedRoute = 'ComputerUseCacheOnly'
 } elseif ($failureText -match '(?i)browser|plugin discovery|browser-client') {
   $selectedRoute = 'BrowserCacheOnly'
 } elseif ($failureText -match '(?i)resourcesPath|nodePath|nodeModuleDirs|nodeReplPath|node_repl|cua_node') {
@@ -131,6 +155,10 @@ if ($repairResult -ne 0) {
 
 $final = if ($selectedRoute -eq 'BrowserNativeHostOnly') {
   Invoke-VerifyBrowserNativeHost
+} elseif ($selectedRoute -eq 'ChromeAppxBootstrapOnly') {
+  Invoke-VerifyChromeAppxBootstrap
+} elseif ($selectedRoute -eq 'ComputerUseCacheOnly') {
+  Invoke-VerifyComputerUseCache
 } else {
   Invoke-VerifyQuick
 }

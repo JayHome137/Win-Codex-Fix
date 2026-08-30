@@ -7,7 +7,7 @@ description: Windows Codex Desktop 更新后的快速、一次性热修。按验
 
 从维护项目的 `scripts` 目录运行 `Invoke-CodexDesktopQuickRepair.ps1 -Route Auto`。
 
-每次更新只执行一次 `Auto`：同步当前 AppX 的 CLI mirror，运行一次 Quick verifier；若失败，按输出选择一个已知路由，并在该路由后再校验一次。一个路由失败就停止，不串联其它层，也不重复运行。
+每次更新只执行一次 `Auto`：同步当前 AppX 的 CLI mirror，运行一次 Quick verifier；若失败，按输出选择一个已知路由，并在该路由后做对应的最小校验。一个路由失败就停止，不串联其它层，也不重复运行。
 
 已知路由：
 
@@ -16,6 +16,8 @@ description: Windows Codex Desktop 更新后的快速、一次性热修。按验
 - `BrowserDiscoveryOnly`：只修复 Browser `latest` 与 `.codex-plugin` 发现链接。
 - `BrowserCacheOnly`：只恢复当前 AppX Browser cache。
 - `BrowserNativeHostOnly`：以当前 AppX 的复数扩展 ID 为真源，只修复 legacy manifest、Chrome HKCU 映射和两份 v2 manifest；默认热修，不关闭 Codex、Chrome 或 Edge。写入前保留同一事务的回滚副本，任一步失败即恢复。
+- `ChromeAppxBootstrapOnly`：绕过已保留的 `openai-bundled` marketplace 名称，直接从当前 AppX 物化 Chrome cache，并调用 AppX 自带的 `installManifest.mjs` 重建 sidecar、legacy manifest、HKCU 映射，再更新 v2 manifest；不触碰 Browser/Computer Use cache，不关闭 Codex、Chrome 或 Edge。
+- `ComputerUseCacheOnly`：绕过 marketplace，直接从当前 AppX 同步 Computer Use 插件 cache 与发现链接；不修改 `cua_node` 运行时、配置或其它插件。
 - `UpdateFirstLaunchDiagnosticOnly`：更新后只有后台进程、没有窗口时，快速区分 runtime 正在 materialize、update-policy 等待、正常启动中或未知 headless；只读，不等待数分钟，不关闭或重启进程。
 - `TmpRuntimeMarketplaceOnly`：只修复已确认的旧临时 marketplace 所有权问题。
 - `Verify`：只运行一次 Quick verifier。

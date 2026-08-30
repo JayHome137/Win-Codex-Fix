@@ -173,6 +173,38 @@ function Test-ChromeNativeHostV2Manifest(
   }
 }
 
+function Test-ChromeExtensionHostSidecar(
+  [string]$Path,
+  [string]$BrowserClientPath,
+  [string]$CodexCliPath,
+  [string]$NodePath,
+  [string]$NodeReplPath
+) {
+  if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+    return $false
+  }
+
+  try {
+    $document = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json -ErrorAction Stop
+    return (
+      [int]$document.schemaVersion -eq 1 -and
+      [string]$document.channel -eq 'prod' -and
+      [string]$document.proxyHost -eq '127.0.0.1' -and
+      [int]$document.proxyPort -eq 0 -and
+      (Test-WindowsPathEqual ([string]$document.browserClientPath) $BrowserClientPath) -and
+      (Test-WindowsPathEqual ([string]$document.codexCliPath) $CodexCliPath) -and
+      (Test-WindowsPathEqual ([string]$document.nodePath) $NodePath) -and
+      (Test-WindowsPathEqual ([string]$document.nodeReplPath) $NodeReplPath) -and
+      (Test-Path -LiteralPath $document.browserClientPath -PathType Leaf) -and
+      (Test-Path -LiteralPath $document.codexCliPath -PathType Leaf) -and
+      (Test-Path -LiteralPath $document.nodePath -PathType Leaf) -and
+      (Test-Path -LiteralPath $document.nodeReplPath -PathType Leaf)
+    )
+  } catch {
+    return $false
+  }
+}
+
 function Write-BrowserNativeHostStep([string]$Message) {
   Write-Host "[codex-repair] $Message"
 }

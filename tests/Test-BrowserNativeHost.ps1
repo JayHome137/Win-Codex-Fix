@@ -134,6 +134,23 @@ try {
   [System.IO.File]::WriteAllText($v2Path, ([ordered]@{ schemaVersion = 2; entries = @($entry) } | ConvertTo-Json -Depth 12))
   Assert-True (-not (Test-ChromeNativeHostV2Manifest $v2Path @($identity.ExtensionIds) $identity.HostName '1.2.3.4' '9.8.7' $browserClient $extensionHost $codexCli $testRoot $node $nodeModules $nodeRepl $resources)) 'v2 extension ID order drift was accepted'
 
+  $sidecarPath = Join-Path $pathsRoot 'extension-host-config.json'
+  $sidecar = [ordered]@{
+    schemaVersion = 1
+    channel = 'prod'
+    browserClientPath = $browserClient
+    codexCliPath = $codexCli
+    nodePath = $node
+    nodeReplPath = $nodeRepl
+    proxyHost = '127.0.0.1'
+    proxyPort = 0
+  }
+  [System.IO.File]::WriteAllText($sidecarPath, ($sidecar | ConvertTo-Json -Depth 5))
+  Assert-True (Test-ChromeExtensionHostSidecar $sidecarPath $browserClient $codexCli $node $nodeRepl) 'valid Chrome sidecar was rejected'
+  $sidecar.proxyPort = 43123
+  [System.IO.File]::WriteAllText($sidecarPath, ($sidecar | ConvertTo-Json -Depth 5))
+  Assert-True (-not (Test-ChromeExtensionHostSidecar $sidecarPath $browserClient $codexCli $node $nodeRepl)) 'non-zero sidecar proxy port was accepted'
+
   $env:LOCALAPPDATA = Join-Path $testRoot 'local-app-data'
   $fixtureCodexHome = Join-Path $testRoot 'codex-home'
   $firstWriteCount = Ensure-ChromeNativeHostV2Manifest $fixtureCodexHome @($identity.ExtensionIds) $identity.HostName '1.2.3.4' '9.8.7' $browserClient $extensionHost $codexCli $node $nodeModules $nodeRepl $resources

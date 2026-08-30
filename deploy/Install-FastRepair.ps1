@@ -63,6 +63,8 @@ $projectFiles = @(
   'scripts\Start-CodexDesktopOnce.ps1',
   'scripts\Verify-CodexDesktopBundled.ps1',
   'tests\Test-BrowserNativeHost.ps1',
+  'tests\Test-ChromeAppxBootstrap.ps1',
+  'tests\Test-ComputerUseCache.ps1',
   'tests\Test-UpdateFirstLaunchDiagnostic.ps1',
   'docs\quick-repair.md'
 )

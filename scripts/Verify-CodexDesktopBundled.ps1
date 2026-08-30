@@ -1,6 +1,8 @@
 param(
   [switch]$Quick,
   [switch]$BrowserNativeHostOnly,
+  [switch]$ChromeAppxBootstrapOnly,
+  [switch]$ComputerUseCacheOnly,
   [switch]$LibraryOnly
 )
 
@@ -28,6 +30,10 @@ function Write-Check([string]$Name, [bool]$Ok, [string]$Detail = '') {
     Write-Host "[FAIL] $Name $Detail"
     $script:Failed = $true
   }
+}
+
+function Write-Info([string]$Name, [string]$Detail = '') {
+  Write-Host "[INFO] $Name $Detail"
 }
 
 function Test-PluginEnabled([string]$Text, [string]$PluginName) {
@@ -736,6 +742,23 @@ function Get-OfficialPluginList {
   }
 }
 
+function Get-OfficialMarketplaceList {
+  $codexCli = Find-CurrentCodexCli
+  if (-not $codexCli) {
+    return $null
+  }
+
+  try {
+    $raw = (& $codexCli plugin marketplace list --json 2>$null | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0) {
+      return $null
+    }
+    return ($raw | ConvertFrom-Json)
+  } catch {
+    return $null
+  }
+}
+
 function Test-WindowsPathEqual([string]$Left, [string]$Right) {
   if ((-not $Left) -or (-not $Right)) {
     return $false
@@ -905,6 +928,105 @@ function Write-NativeHostChecks(
     ([string]$registryValue)
 }
 
+function Write-ChromeAppxBootstrapChecks(
+  $CurrentPackage,
+  [string]$CurrentBundledSource,
+  [string]$ChromeRoot,
+  [string]$CodexHomePath,
+  [string]$ConfigPath,
+  [string]$CodexCliPath,
+  [string]$LegacyManifestPath
+) {
+  Write-Check 'current AppX Chrome source' ($CurrentPackage -and $CurrentBundledSource) $CurrentBundledSource
+  if (-not $CurrentPackage -or -not $CurrentBundledSource) { return }
+
+  $installLocation = [string]$CurrentPackage.InstallLocation
+  $chromeSource = Join-Path $CurrentBundledSource 'plugins\chrome'
+  $chromeVersion = $null
+  try { $chromeVersion = Get-PluginVersion $chromeSource } catch { }
+  Write-Check 'current AppX Chrome source matches AppxBlockMap' `
+    ($chromeVersion -and (Test-AppxBlockMapTreeComplete $installLocation $chromeSource 'app\resources\plugins\openai-bundled\plugins\chrome\')) `
+    $chromeSource
+  if (-not $chromeVersion) { return }
+
+  $versionRoot = Join-Path $ChromeRoot $chromeVersion
+  $required = @(
+    'scripts\browser-client.mjs',
+    'scripts\installManifest.mjs',
+    'extension-host\windows\x64\extension-host.exe',
+    'assets\google-chrome.png',
+    '.codex-plugin\plugin.json'
+  )
+  foreach ($relative in $required) {
+    Write-Check "chrome cache $relative" (Test-Path -LiteralPath (Join-Path $versionRoot $relative) -PathType Leaf) (Join-Path $versionRoot $relative)
+  }
+  $latest = Join-Path $ChromeRoot 'latest'
+  $latestItem = Get-Item -LiteralPath $latest -Force -ErrorAction SilentlyContinue
+  $latestTarget = if ($latestItem) { [string](@($latestItem.Target) | Select-Object -First 1) } else { '' }
+  Write-Check 'chrome latest points to current AppX concrete' `
+    ($latestTarget -and (Test-WindowsPathEqual $latestTarget $versionRoot)) `
+    "$latest -> $latestTarget"
+  $metadata = Join-Path $ChromeRoot '.codex-plugin'
+  $metadataItem = Get-Item -LiteralPath $metadata -Force -ErrorAction SilentlyContinue
+  $metadataTarget = if ($metadataItem) { [string](@($metadataItem.Target) | Select-Object -First 1) } else { '' }
+  Write-Check 'chrome metadata points to current AppX concrete' `
+    ($metadataTarget -and (Test-WindowsPathEqual $metadataTarget (Join-Path $versionRoot '.codex-plugin'))) `
+    "$metadata -> $metadataTarget"
+
+  $runtimeBin = Get-CurrentCuaRuntimeBin $ConfigPath
+  $nodePath = if ($runtimeBin) { Join-Path $runtimeBin 'node.exe' } else { '' }
+  $nodeReplPath = if ($runtimeBin) { Join-Path $runtimeBin 'node_repl.exe' } else { '' }
+  $sidecar = Join-Path $latest 'extension-host\windows\x64\extension-host-config.json'
+  Write-Check 'chrome extension-host sidecar' `
+    (Test-ChromeExtensionHostSidecar $sidecar (Join-Path $latest 'scripts\browser-client.mjs') $CodexCliPath $nodePath $nodeReplPath) `
+    $sidecar
+
+  Write-NativeHostChecks $CurrentPackage $CurrentBundledSource $ChromeRoot $CodexHomePath $ConfigPath $CodexCliPath $LegacyManifestPath
+}
+
+function Write-ComputerUseCacheChecks(
+  $CurrentPackage,
+  [string]$CurrentBundledSource,
+  [string]$ComputerUseRoot
+) {
+  Write-Check 'current AppX Computer Use source' ($CurrentPackage -and $CurrentBundledSource) $CurrentBundledSource
+  if (-not $CurrentPackage -or -not $CurrentBundledSource) { return }
+
+  $installLocation = [string]$CurrentPackage.InstallLocation
+  $computerUseSource = Join-Path $CurrentBundledSource 'plugins\computer-use'
+  $computerUseVersion = Get-PluginVersion $computerUseSource
+  Write-Check 'current AppX Computer Use source matches AppxBlockMap' `
+    ($computerUseVersion -and (Test-AppxBlockMapTreeComplete $installLocation $computerUseSource 'app\resources\plugins\openai-bundled\plugins\computer-use\')) `
+    $computerUseSource
+  if (-not $computerUseVersion) { return }
+
+  $versionRoot = Join-Path $ComputerUseRoot $computerUseVersion
+  foreach ($relative in @(
+      '.codex-plugin\plugin.json',
+      'assets\app-icon.png',
+      'docs\api.md',
+      'docs\confirmations.md',
+      'docs\guidance.md',
+      'skills\computer-use\SKILL.md'
+    )) {
+    Write-Check "computer-use cache $relative" (Test-Path -LiteralPath (Join-Path $versionRoot $relative) -PathType Leaf) (Join-Path $versionRoot $relative)
+  }
+
+  $latest = Join-Path $ComputerUseRoot 'latest'
+  $latestItem = Get-Item -LiteralPath $latest -Force -ErrorAction SilentlyContinue
+  $latestTarget = if ($latestItem) { [string](@($latestItem.Target) | Select-Object -First 1) } else { '' }
+  Write-Check 'computer-use latest points to current AppX concrete' `
+    ($latestTarget -and (Test-WindowsPathEqual $latestTarget $versionRoot) -and (Test-Path -LiteralPath (Join-Path $latest '.codex-plugin\plugin.json') -PathType Leaf)) `
+    "$latest -> $latestTarget"
+
+  $metadata = Join-Path $ComputerUseRoot '.codex-plugin'
+  $metadataItem = Get-Item -LiteralPath $metadata -Force -ErrorAction SilentlyContinue
+  $metadataTarget = if ($metadataItem) { [string](@($metadataItem.Target) | Select-Object -First 1) } else { '' }
+  Write-Check 'computer-use metadata points to current AppX concrete' `
+    ($metadataTarget -and (Test-WindowsPathEqual $metadataTarget (Join-Path $versionRoot '.codex-plugin')) -and (Test-Path -LiteralPath (Join-Path $metadata 'plugin.json') -PathType Leaf)) `
+    "$metadata -> $metadataTarget"
+}
+
 $script:Failed = $false
 
 if ($LibraryOnly) {
@@ -926,6 +1048,26 @@ $BundledSource = if ($LatestWindowsAppsBundledSource) {
 } else {
   Find-BundledSource
 }
+if ($ChromeAppxBootstrapOnly) {
+  Write-ChromeAppxBootstrapChecks `
+    $CurrentCodexPackage `
+    $LatestWindowsAppsBundledSource `
+    (Join-Path $PluginCacheRoot 'chrome') `
+    $CodexHome `
+    $ConfigPath `
+    $CodexCliMirror `
+    $ExtensionManifest
+  if ($script:Failed) { exit 1 }
+  exit 0
+}
+if ($ComputerUseCacheOnly) {
+  Write-ComputerUseCacheChecks `
+    $CurrentCodexPackage `
+    $LatestWindowsAppsBundledSource `
+    (Join-Path $PluginCacheRoot 'computer-use')
+  if ($script:Failed) { exit 1 }
+  exit 0
+}
 if ($BrowserNativeHostOnly) {
   Write-NativeHostChecks `
     $CurrentCodexPackage `
@@ -940,6 +1082,15 @@ if ($BrowserNativeHostOnly) {
 }
 
 $PersistentBundledMarketplaceRoot = Join-Path $RepairRoot 'state\openai-bundled-marketplace'
+$officialMarketplaceList = Get-OfficialMarketplaceList
+$registeredBundledMarketplace = if ($officialMarketplaceList) {
+  @($officialMarketplaceList.marketplaces) |
+    Where-Object { [string]$_.name -eq 'openai-bundled' } |
+    Select-Object -First 1
+} else {
+  $null
+}
+$bundledMarketplaceActive = $null -ne $registeredBundledMarketplace
 Write-Check 'current AppX bundled source found' ($null -ne $LatestWindowsAppsBundledSource) $LatestWindowsAppsBundledSource
 Write-Check `
   'current AppX bundled source matches AppxBlockMap' `
@@ -949,11 +1100,15 @@ if ($BundledSource) {
   Write-Check 'bundled source marketplace JSON parses' (Test-Json (Join-Path $BundledSource '.agents\plugins\marketplace.json'))
 }
 
-Write-Check 'persistent bundled marketplace mirror' (Test-CompleteBundledSource $PersistentBundledMarketplaceRoot) $PersistentBundledMarketplaceRoot
-Write-Check `
-  'persistent bundled marketplace matches current AppX' `
-  (Test-BundledSourceMatches $PersistentBundledMarketplaceRoot $LatestWindowsAppsBundledSource) `
-  $PersistentBundledMarketplaceRoot
+if ($bundledMarketplaceActive) {
+  Write-Check 'persistent bundled marketplace mirror' (Test-CompleteBundledSource $PersistentBundledMarketplaceRoot) $PersistentBundledMarketplaceRoot
+  Write-Check `
+    'persistent bundled marketplace matches current AppX' `
+    (Test-BundledSourceMatches $PersistentBundledMarketplaceRoot $LatestWindowsAppsBundledSource) `
+    $PersistentBundledMarketplaceRoot
+} else {
+  Write-Info 'bundled marketplace mirror' 'current CLI does not register openai-bundled; AppX is the authoritative source'
+}
 
 $MarketplaceLink = Join-Path $CodexHome 'marketplaces\openai-bundled'
 $marketplaceCurrent = $false
@@ -968,7 +1123,11 @@ if (Test-Path -LiteralPath $MarketplaceLink) {
     $target.TrimEnd('\') -ieq $PersistentBundledMarketplaceRoot.TrimEnd('\')
   )
 }
-Write-Check 'marketplace junction current' $marketplaceCurrent $marketplaceDetail
+if ($bundledMarketplaceActive) {
+  Write-Check 'marketplace junction current' $marketplaceCurrent $marketplaceDetail
+} else {
+  Write-Info 'marketplace junction' 'not used by the current AppX plugin flow'
+}
 
 $TmpRuntimeMarketplace = Join-Path $CodexHome '.tmp\bundled-marketplaces\openai-bundled'
 $tmpRuntimeMarketplaceCurrent = $false
@@ -995,7 +1154,11 @@ if ($tmpRuntimeMarketplaceItem) {
   $tmpRuntimeMarketplaceCurrent = $true
   $tmpRuntimeMarketplaceDetail = "$TmpRuntimeMarketplace host scratch is not materialized"
 }
-Write-Check 'tmp runtime marketplace host-owned and current' $tmpRuntimeMarketplaceCurrent $tmpRuntimeMarketplaceDetail
+if ($bundledMarketplaceActive) {
+  Write-Check 'tmp runtime marketplace host-owned and current' $tmpRuntimeMarketplaceCurrent $tmpRuntimeMarketplaceDetail
+} else {
+  Write-Info 'tmp runtime marketplace' 'not used by the current AppX plugin flow'
+}
 
 $browserAppxSource = if ($LatestWindowsAppsBundledSource) { Join-Path $LatestWindowsAppsBundledSource 'plugins\browser' } else { $null }
 $browserVersion = if ($browserAppxSource) { Get-PluginVersion $browserAppxSource } else { $null }
@@ -1039,7 +1202,7 @@ $paths = @(
   @{ Name = 'chrome client'; Path = Join-Path $chromeRoot 'latest\scripts\browser-client.mjs' },
   @{ Name = 'chrome extension host'; Path = Join-Path $chromeRoot 'latest\extension-host\windows\x64\extension-host.exe' },
   @{ Name = 'chrome icon'; Path = Join-Path $chromeRoot 'latest\assets\google-chrome.png' },
-  @{ Name = 'computer-use client'; Path = Join-Path $computerUseRoot 'latest\scripts\computer-use-client.mjs' },
+  @{ Name = 'computer-use plugin metadata'; Path = Join-Path $computerUseRoot 'latest\.codex-plugin\plugin.json' },
   @{ Name = 'native host manifest'; Path = $ExtensionManifest }
 )
 foreach ($entry in $paths) {
@@ -1101,13 +1264,28 @@ $chromeOpaqueText = if ($LatestWindowsAppsBundledSource -and $chromeVersion) {
 } else {
   $null
 }
-$chromeOpaqueTextOk = $chromeOpaqueText -and ($chromeOpaqueText.State -in @('not-required', 'complete'))
-$chromeOpaqueTextDetail = if ($chromeOpaqueText) {
+$runtimeBin = Get-CurrentCuaRuntimeBin $ConfigPath
+$node = if ($runtimeBin) { Join-Path $runtimeBin 'node.exe' } else { $null }
+$chromeClientConcrete = if ($chromeVersion) { Join-Path $chromeRoot "$chromeVersion\scripts\browser-client.mjs" } else { $null }
+$chromeModuleLoadOk = $false
+if ($node -and $chromeClientConcrete -and (Test-Path -LiteralPath $node) -and (Test-Path -LiteralPath $chromeClientConcrete)) {
+  $chromeClientUrl = 'file:///' + $chromeClientConcrete.Replace('\', '/')
+  & $node '--input-type=module' '-e' 'await import(process.argv[1])' $chromeClientUrl 2>$null | Out-Null
+  $chromeModuleLoadOk = ($LASTEXITCODE -eq 0)
+}
+$chromeOpaqueTextOk = $chromeOpaqueText -and (
+  $chromeOpaqueText.State -in @('not-required', 'complete') -or
+  ($chromeOpaqueText.State -eq 'repairable' -and $chromeModuleLoadOk)
+)
+$chromeOpaqueTextDetail = if ($chromeOpaqueText -and $chromeOpaqueText.State -eq 'repairable' -and $chromeModuleLoadOk) {
+  "runtime-compatible; opaqueFiles=$($chromeOpaqueText.OpaqueFileCount); direct module load passed"
+} elseif ($chromeOpaqueText) {
   "$($chromeOpaqueText.State); opaqueFiles=$($chromeOpaqueText.OpaqueFileCount); $($chromeOpaqueText.ErrorSummary)"
 } else {
   'current AppX Chrome source or version unavailable'
 }
-Write-Check 'chrome runtime opaque-text materialization' $chromeOpaqueTextOk $chromeOpaqueTextDetail
+Write-Check 'chrome runtime compatibility' $chromeOpaqueTextOk $chromeOpaqueTextDetail
+Write-Check 'chrome browser-client module load' $chromeModuleLoadOk $chromeClientConcrete
 
 Write-NativeHostChecks `
   $CurrentCodexPackage `
@@ -1118,7 +1296,6 @@ Write-NativeHostChecks `
   $CodexCliMirror `
   $ExtensionManifest
 
-$runtimeBin = Get-CurrentCuaRuntimeBin $ConfigPath
 $runtimeConfigText = if (Test-Path -LiteralPath $ConfigPath) { Get-Content -LiteralPath $ConfigPath -Raw } else { $null }
 Write-Check 'computer-use runtime configured' ($null -ne $runtimeBin) $runtimeBin
 if ($runtimeBin) {
@@ -1128,16 +1305,6 @@ if ($runtimeBin) {
   Write-Check 'codex-computer-use.exe exists' (Test-Path -LiteralPath (Join-Path $runtimeBin 'node_modules\@oai\sky\bin\windows\codex-computer-use.exe')) (Join-Path $runtimeBin 'node_modules\@oai\sky\bin\windows\codex-computer-use.exe')
   Write-Check 'Computer Use helper transport exists' (Test-Path -LiteralPath (Join-Path $runtimeBin 'node_modules\@oai\sky\dist\project\cua\sky_js\src\targets\windows\internal\helper_transport.js')) (Join-Path $runtimeBin 'node_modules\@oai\sky\dist\project\cua\sky_js\src\targets\windows\internal\helper_transport.js')
 }
-
-$node = if ($runtimeBin) { Join-Path $runtimeBin 'node.exe' } else { $null }
-$chromeClientConcrete = if ($chromeVersion) { Join-Path $chromeRoot "$chromeVersion\scripts\browser-client.mjs" } else { $null }
-$chromeModuleLoadOk = $false
-if ($chromeOpaqueTextOk -and $node -and $chromeClientConcrete -and (Test-Path -LiteralPath $node) -and (Test-Path -LiteralPath $chromeClientConcrete)) {
-  $chromeClientUrl = 'file:///' + $chromeClientConcrete.Replace('\', '/')
-  & $node '--input-type=module' '-e' 'await import(process.argv[1])' $chromeClientUrl 2>$null | Out-Null
-  $chromeModuleLoadOk = ($LASTEXITCODE -eq 0)
-}
-Write-Check 'chrome browser-client module load' $chromeModuleLoadOk $chromeClientConcrete
 
 $cuaNodeSource = Find-LatestWindowsAppsCuaNodeSource
 Write-Check 'packaged cua_node source found' ($null -ne $cuaNodeSource) $cuaNodeSource
@@ -1202,7 +1369,7 @@ Write-Check 'Machine-level CODEX_CLI_PATH has no conflicting value' (-not $codex
 
 $officialPluginList = Get-OfficialPluginList
 Write-Check 'official plugin list available' ($null -ne $officialPluginList) 'current Codex CLI'
-if ($officialPluginList) {
+if ($officialPluginList -and $bundledMarketplaceActive) {
   $expectedPluginVersions = @{
     browser = $browserVersion
     chrome = $chromeVersion
@@ -1228,6 +1395,8 @@ if ($officialPluginList) {
     }
     Write-Check "official installed plugin $plugin" $ok $detail
   }
+} elseif ($officialPluginList) {
+  Write-Info 'bundled plugin install records' 'openai-bundled is not registered by the current CLI; AppX/cache checks are authoritative'
 }
 
 if (-not $Quick) {

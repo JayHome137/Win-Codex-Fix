@@ -61,7 +61,7 @@ Set-Location .\Win-Codex-Fix
 pwsh.exe -NoProfile -NonInteractive -File .\scripts\Invoke-CodexDesktopQuickRepair.ps1 -Route Auto
 ```
 
-`Auto` 的运行顺序固定为：同步 CLI mirror → Quick verifier → 最多一个匹配路由 → 写后 Quick verifier。已经健康时不会修改其它组件，也不要求重启应用。
+`Auto` 的运行顺序固定为：同步 CLI mirror → Quick verifier → 最多一个匹配路由 → 对应层的最小验收。已经健康时不会修改其它组件，也不要求重启应用。
 
 如果输出 `manual-required` 或 `selected route failed`，请保留现场并停止，不要手工串联多个路由。
 
@@ -106,7 +106,7 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File .\deploy\Install-FastRepair.ps
 核心原则：
 
 1. **AppX 是真源**：动态读取当前注册的最高版本，不依赖固定版本路径。
-2. **先归因再修复**：只处理 verifier 能明确归属的 CLI、运行时、Browser discovery/cache 或 marketplace 层。
+2. **先归因再修复**：只处理 verifier 能明确归属的 CLI、运行时、Browser discovery/cache、Chrome AppX bootstrap 或 marketplace 层。
 3. **一次只走一条路**：路由成功或失败后都停止，不叠加无关 fallback。
 4. **最小写入**：只修改目标层需要的 mirror、链接、manifest 或环境配置。
 5. **可回滚提交**：Native Host 多文件更新会先保存原始字节与注册表默认值，任一步失败即恢复。
@@ -122,9 +122,15 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File .\deploy\Install-FastRepair.ps
 | `BrowserDiscoveryOnly` | 只修复 Browser 的 `latest` 和 `.codex-plugin` 链接 |
 | `BrowserCacheOnly` | 只恢复当前 AppX Browser cache |
 | `BrowserNativeHostOnly` | 只同步复数扩展 ID、legacy manifest、Chrome HKCU 映射与两份 v2 Native Host manifest；无需关闭 Codex、Chrome、Edge |
+| `ChromeAppxBootstrapOnly` | 不经过 marketplace，直接用当前 AppX Chrome 和官方 `installManifest.mjs` 重建 Chrome cache、sidecar、legacy/v2 manifest 与 HKCU 映射 |
+| `ComputerUseCacheOnly` | 不经过 marketplace，直接用当前 AppX 同步 Computer Use 插件 cache 与发现链接；不修改 `cua_node` 运行时 |
 | `UpdateFirstLaunchDiagnosticOnly` | 更新后无窗口时只读识别 runtime materialization、update-policy 等待或未知 headless，不重启、不轮询 |
 | `TmpRuntimeMarketplaceOnly` | 只处理已确认的旧临时 marketplace junction |
 | `Verify` | 只运行 Quick verifier，不写入 |
+
+`ChromeAppxBootstrapOnly` 只验证 Chrome 链路本身：当前 AppX 文件集、cache 发现链接、官方 sidecar、legacy/v2 Native Host 和 HKCU 映射。Browser、Computer Use、CLI mirror 或 marketplace 的其它失败会单独报告，不会被伪装成“全部修复”。
+
+`ComputerUseCacheOnly` 只验证 Computer Use 插件版本、实体文件和 `latest`/`.codex-plugin` 链接；`cua_node` 运行时漂移仍由 `RuntimeOnly` 单独负责。
 
 显式路由只应在故障 owner 已经明确时使用。普通更新后优先运行一次 `Auto`。
 
