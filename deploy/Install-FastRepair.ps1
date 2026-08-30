@@ -45,6 +45,7 @@ if ($healthTask -and [string]$healthTask.State -eq 'Running') {
 $projectFiles = @(
   '.gitignore',
   'README.md',
+  'CONTRIBUTING.md',
   'LICENSE',
   'SKILL.md',
   'BUNDLE-MANIFEST.sha256',
@@ -65,7 +66,8 @@ $projectFiles = @(
   'tests\Test-ChromeAppxBootstrap.ps1',
   'tests\Test-ComputerUseCache.ps1',
   'tests\Test-EdgeNativeHost.ps1',
-  'docs\quick-repair.md'
+  'docs\quick-repair.md',
+  '.github\ISSUE_TEMPLATE\bug-report.md'
 )
 foreach ($relative in $projectFiles) { Copy-StageFile $relative $ProjectRoot }
 

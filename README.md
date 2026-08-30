@@ -65,6 +65,15 @@ pwsh.exe -NoProfile -NonInteractive -File .\scripts\Invoke-CodexDesktopQuickRepa
 
 如果输出 `manual-required` 或 `selected route failed`，请保留现场并停止，不要手工串联多个路由。
 
+## 🤝 共建与反馈
+
+欢迎提交不同 Windows 版本、Codex/AppX 版本和浏览器组合下的反馈。**用户反馈是线索，不自动等同于已复现或已修复。** 无法准备 Windows 实机时，可以先提交 `user-reported`，由维护者用静态检查或最小 fixture 固化证据；行为性修复只有在真实 Windows 验证后才进入 `main` 和 `Auto`。
+
+- 共建规则：[CONTRIBUTING.md](./CONTRIBUTING.md)
+- Bug 反馈模板：[.github/ISSUE_TEMPLATE/bug-report.md](./.github/ISSUE_TEMPLATE/bug-report.md)
+
+请只提交脱敏后的最小输出。不要上传 token、Cookie、密码、session、数据库、完整用户路径或未脱敏截图。
+
 ## 📦 安装为 Codex Skill
 
 安装脚本会发布维护副本，并将 Skill 元数据复制到当前 Windows 用户的 Codex Skill 目录：
@@ -146,6 +155,8 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File .\deploy\Install-FastRepair.ps
 
 ```text
 SKILL.md                         Skill 触发条件与操作边界
+CONTRIBUTING.md                  共建规则、证据等级与反馈处理流程
+.github/ISSUE_TEMPLATE/           结构化 Bug 反馈模板
 agents/openai.yaml               Codex 显示信息与默认提示
 scripts/                         PowerShell、Python、VBS 实现
 tests/                           Windows PowerShell 5.1 / 7 focused fixtures
