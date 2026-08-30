@@ -4,6 +4,7 @@ param(
   [switch]$BrowserDiscoveryOnly,
   [switch]$BrowserCacheOnly,
   [switch]$BrowserNativeHostOnly,
+  [switch]$EdgeNativeHostOnly,
   [switch]$ChromeAppxBootstrapOnly,
   [switch]$ComputerUseCacheOnly,
   [switch]$TmpRuntimeMarketplaceOnly,
@@ -29,10 +30,10 @@ if (-not (Test-Path -LiteralPath $BrowserNativeHostLibrary -PathType Leaf)) {
 . $BrowserNativeHostLibrary
 
 $selectedTargetedModes = @(
-  @($CliMirrorOnly, $RuntimeOnly, $BrowserDiscoveryOnly, $BrowserCacheOnly, $BrowserNativeHostOnly, $ChromeAppxBootstrapOnly, $ComputerUseCacheOnly, $TmpRuntimeMarketplaceOnly) | Where-Object { $_ }
+  @($CliMirrorOnly, $RuntimeOnly, $BrowserDiscoveryOnly, $BrowserCacheOnly, $BrowserNativeHostOnly, $EdgeNativeHostOnly, $ChromeAppxBootstrapOnly, $ComputerUseCacheOnly, $TmpRuntimeMarketplaceOnly) | Where-Object { $_ }
 )
 if ($selectedTargetedModes.Count -gt 1) {
-  throw 'Choose only one targeted repair mode: -CliMirrorOnly, -RuntimeOnly, -BrowserDiscoveryOnly, -BrowserCacheOnly, -BrowserNativeHostOnly, -ChromeAppxBootstrapOnly, -ComputerUseCacheOnly, or -TmpRuntimeMarketplaceOnly.'
+  throw 'Choose only one targeted repair mode: -CliMirrorOnly, -RuntimeOnly, -BrowserDiscoveryOnly, -BrowserCacheOnly, -BrowserNativeHostOnly, -EdgeNativeHostOnly, -ChromeAppxBootstrapOnly, -ComputerUseCacheOnly, or -TmpRuntimeMarketplaceOnly.'
 }
 if ($AutomaticPostUpdate -and $selectedTargetedModes.Count -gt 0) {
   throw '-AutomaticPostUpdate cannot be combined with a targeted repair mode.'
@@ -2428,6 +2429,7 @@ function Get-ChromeAppxBootstrapBlockers([string]$ChromeRoot) {
     $name = [string]$process.Name
     $path = [string]$process.ExecutablePath
     $commandLine = [string]$process.CommandLine
+    $normalizedCommandLine = if ($commandLine) { $commandLine.Replace('/', '\') } else { '' }
     $isManaged = $false
     $reason = $null
     if ($name -ieq 'extension-host.exe' -and $path -and $path.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
@@ -2437,7 +2439,11 @@ function Get-ChromeAppxBootstrapBlockers([string]$ChromeRoot) {
       if ($path -and $path.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
         $isManaged = $true
         $reason = 'Chrome cache runtime'
-      } elseif ($commandLine -and $commandLine -match '(?i)browser-client\.mjs') {
+      } elseif (
+        $normalizedCommandLine -and
+        $normalizedCommandLine.IndexOf($prefix, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -and
+        $normalizedCommandLine -match '(?i)browser-client\.mjs'
+      ) {
         $isManaged = $true
         $reason = 'Chrome browser client runtime'
       }
@@ -2859,6 +2865,77 @@ if ($BrowserNativeHostOnly) {
 
   $backupDetail = if ($rollback) { "; rollbackBackup=$($rollback.BackupDirectory)" } else { '' }
   Write-Step "Targeted Browser native-host repair complete: schema=$($identity.Schema), extensionIds=$(@($identity.ExtensionIds).Count), directChanges=$changed$backupDetail. No process was stopped or restarted."
+  exit 0
+}
+
+if ($EdgeNativeHostOnly) {
+  Write-Step 'Starting targeted Edge native-host registry repair; Chrome manifest and all caches remain untouched.'
+
+  $currentPackage = Get-AppxPackage -Name 'OpenAI.Codex' -ErrorAction SilentlyContinue |
+    Sort-Object Version -Descending |
+    Select-Object -First 1
+  if (-not $currentPackage) {
+    throw 'EdgeNativeHostOnly could not resolve the current registered Codex AppX package.'
+  }
+
+  $bundledSource = Find-LatestWindowsAppsBundledSource
+  if (-not $bundledSource) {
+    throw 'EdgeNativeHostOnly could not resolve the current registered AppX bundled source.'
+  }
+  $chromeSource = Join-Path $bundledSource 'plugins\chrome'
+  $chromeVersion = Get-PluginVersion $chromeSource
+  $identity = Get-ChromiumNativeHostIdentity $chromeSource
+  $chromeRoot = Join-Path $PluginCacheRoot 'chrome'
+  $chromeVersionRoot = Join-Path $chromeRoot $chromeVersion
+  $concreteHostPath = Join-Path $chromeVersionRoot 'extension-host\windows\x64\extension-host.exe'
+  $latestHostPath = Join-Path $chromeRoot 'latest\extension-host\windows\x64\extension-host.exe'
+  if (-not (Test-PluginCache $chromeRoot $chromeVersion @(
+        'scripts\browser-client.mjs',
+        'extension-host\windows\x64\extension-host.exe',
+        '.codex-plugin\plugin.json'
+      ))) {
+    throw 'EdgeNativeHostOnly requires the current Chrome cache; repair that owner first.'
+  }
+  if (-not (Test-ChromiumNativeHostManifest $ExtensionManifest $identity @($concreteHostPath, $latestHostPath))) {
+    throw 'EdgeNativeHostOnly requires a valid current legacy native-host manifest; repair BrowserNativeHostOnly first.'
+  }
+
+  $registryPath = "Registry::HKEY_CURRENT_USER\Software\Microsoft\Edge\NativeMessagingHosts\$($identity.HostName)"
+  $registryValue = $null
+  try {
+    $registryValue = (Get-ItemProperty -LiteralPath $registryPath -Name '(default)' -ErrorAction Stop).'(default)'
+  } catch { }
+  $needsRepair = -not (Test-WindowsPathEqual ([string]$registryValue) $ExtensionManifest)
+  $rollback = $null
+  try {
+    if ($needsRepair) {
+      $rollback = New-BrowserNativeHostRollbackBackup `
+        (Join-Path $RepairRoot 'archives\browser-native-host-backups') `
+        @() `
+        $registryPath
+      New-Item -Path $registryPath -Force | Out-Null
+      Set-Item -LiteralPath $registryPath -Value $ExtensionManifest
+    }
+
+    $registryValue = (Get-ItemProperty -LiteralPath $registryPath -Name '(default)' -ErrorAction Stop).'(default)'
+    if (-not (Test-WindowsPathEqual ([string]$registryValue) $ExtensionManifest)) {
+      throw 'EdgeNativeHostOnly registry post-write verification failed.'
+    }
+  } catch {
+    $repairError = $_
+    if ($rollback) {
+      try {
+        Restore-BrowserNativeHostRollbackBackup $rollback
+      } catch {
+        throw "$($repairError.Exception.Message) EdgeNativeHostOnly rollback failed: $($_.Exception.Message); backup=$($rollback.BackupDirectory)"
+      }
+      throw "$($repairError.Exception.Message) EdgeNativeHostOnly restored the original registry state from $($rollback.BackupDirectory)."
+    }
+    throw
+  }
+
+  $backupDetail = if ($rollback) { "; rollbackBackup=$($rollback.BackupDirectory)" } else { '' }
+  Write-Step "Targeted Edge native-host registry repair complete: host=$($identity.HostName), changed=$([int]$needsRepair)$backupDetail. No process was stopped or restarted."
   exit 0
 }
 

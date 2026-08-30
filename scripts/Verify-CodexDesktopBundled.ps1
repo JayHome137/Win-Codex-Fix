@@ -3,6 +3,7 @@ param(
   [switch]$BrowserNativeHostOnly,
   [switch]$ChromeAppxBootstrapOnly,
   [switch]$ComputerUseCacheOnly,
+  [switch]$EdgeNativeHostOnly,
   [switch]$LibraryOnly
 )
 
@@ -928,6 +929,52 @@ function Write-NativeHostChecks(
     ([string]$registryValue)
 }
 
+function Test-EdgeExtensionInstalled([string[]]$ExtensionIds) {
+  $edgeExtensionsRoot = Join-Path $env:LOCALAPPDATA 'Microsoft\Edge\User Data'
+  if (-not (Test-Path -LiteralPath $edgeExtensionsRoot -PathType Container)) {
+    return $false
+  }
+
+  foreach ($profile in @(Get-ChildItem -LiteralPath $edgeExtensionsRoot -Directory -ErrorAction SilentlyContinue)) {
+    $extensions = Join-Path $profile.FullName 'Extensions'
+    foreach ($extensionId in @($ExtensionIds)) {
+      if (Test-Path -LiteralPath (Join-Path $extensions $extensionId) -PathType Container) {
+        return $true
+      }
+    }
+  }
+  return $false
+}
+
+function Write-EdgeNativeHostCheck(
+  [string]$CurrentBundledSource,
+  [string]$LegacyManifestPath
+) {
+  try {
+    if (-not $CurrentBundledSource) {
+      Write-Info 'edge native host' 'current AppX Chrome source unavailable'
+      return
+    }
+    $identity = Get-ChromiumNativeHostIdentity (Join-Path $CurrentBundledSource 'plugins\chrome')
+    if (-not (Test-EdgeExtensionInstalled @($identity.ExtensionIds))) {
+      Write-Info 'edge native host' 'current Edge profile has no bundled extension; registry check skipped'
+      return
+    }
+
+    $registryPath = "Registry::HKEY_CURRENT_USER\Software\Microsoft\Edge\NativeMessagingHosts\$($identity.HostName)"
+    $registryValue = $null
+    try {
+      $registryValue = (Get-ItemProperty -LiteralPath $registryPath -Name '(default)' -ErrorAction Stop).'(default)'
+    } catch { }
+    Write-Check `
+      'edge native host HKCU registry' `
+      (Test-WindowsPathEqual ([string]$registryValue) $LegacyManifestPath) `
+      ([string]$registryValue)
+  } catch {
+    Write-Check 'edge native host HKCU registry' $false $_.Exception.Message
+  }
+}
+
 function Write-ChromeAppxBootstrapChecks(
   $CurrentPackage,
   [string]$CurrentBundledSource,
@@ -1065,6 +1112,11 @@ if ($ComputerUseCacheOnly) {
     $CurrentCodexPackage `
     $LatestWindowsAppsBundledSource `
     (Join-Path $PluginCacheRoot 'computer-use')
+  if ($script:Failed) { exit 1 }
+  exit 0
+}
+if ($EdgeNativeHostOnly) {
+  Write-EdgeNativeHostCheck $LatestWindowsAppsBundledSource $ExtensionManifest
   if ($script:Failed) { exit 1 }
   exit 0
 }
@@ -1295,6 +1347,8 @@ Write-NativeHostChecks `
   $ConfigPath `
   $CodexCliMirror `
   $ExtensionManifest
+
+Write-EdgeNativeHostCheck $LatestWindowsAppsBundledSource $ExtensionManifest
 
 $runtimeConfigText = if (Test-Path -LiteralPath $ConfigPath) { Get-Content -LiteralPath $ConfigPath -Raw } else { $null }
 Write-Check 'computer-use runtime configured' ($null -ne $runtimeBin) $runtimeBin
