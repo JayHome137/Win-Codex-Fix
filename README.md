@@ -9,7 +9,7 @@
 ![PowerShell](https://img.shields.io/badge/PowerShell-5.1%20%7C%207-5391FE?logo=powershell&logoColor=white)
 ![Target](https://img.shields.io/badge/target-Codex_Desktop-111827)
 ![Type](https://img.shields.io/badge/type-Agent_Skill-7C3AED)
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](./LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
 </div>
 
@@ -163,7 +163,7 @@ tests/                           Windows PowerShell 5.1 / 7 focused fixtures
 deploy/Install-FastRepair.ps1    Windows 安装与更新脚本
 docs/quick-repair.md             快速决策说明
 BUNDLE-MANIFEST.sha256           发布文件 SHA-256 清单
-LICENSE                          GNU GPL v3.0 完整许可证文本
+LICENSE                          MIT 完整许可证文本
 ```
 
 仓库只保留可复用代码和文档。机器路径、IP、账号、审计快照、同步记录、运行日志、`state/`、`archives/` 与用户数据都不属于公开发布包。
@@ -186,7 +186,7 @@ Get-FileHash .\README.md, .\SKILL.md -Algorithm SHA256
 
 Copyright © 2026 JayHome137。
 
-本项目以 **GNU General Public License v3.0（GPL-3.0-only）** 发布。你可以使用、研究、修改和分发本项目，但分发修改版或衍生作品时必须继续采用 GPL-3.0，并提供相应源代码、保留版权与许可证声明。
+本项目以 **MIT License** 发布。你可以使用、研究、修改、合并、发布、分发、再许可和销售本项目及其衍生作品，但必须在副本或实质性部分中保留版权声明和许可声明。
 
 完整条款见 [LICENSE](./LICENSE)。本项目不提供任何明示或暗示担保；厂商名称、产品名称与商标仍归各自权利人所有。
 
