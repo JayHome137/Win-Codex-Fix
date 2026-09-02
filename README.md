@@ -38,6 +38,7 @@ Win-Codex-Fix 以当前已注册的 AppX 为真源，先做快速验证，再只
 ## 🎯 能修什么
 
 - bundled Browser、Chrome 或 Computer Use 组件无法发现或启动；
+- Code Mode 在 probe 前出现 `codex-code-mode-host.exe` 缺失、版本漂移或 IPC 初始化失败；
 - 本地 CLI mirror 与当前 AppX 版本不一致；
 - `node_repl`、`cua_node` 的运行时或资源路径漂移；
 - Browser cache 的 `latest` / `.codex-plugin` 发现链接异常；
@@ -126,7 +127,7 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File .\deploy\Install-FastRepair.ps
 | 路由 | 用途 |
 | --- | --- |
 | `Auto` | 推荐入口；自动完成一次判断和最多一次修复 |
-| `CliMirrorOnly` | 只同步当前 AppX CLI mirror |
+| `CliMirrorOnly` | 只同步当前 AppX 的 `codex.exe` 与 `codex-code-mode-host.exe` CLI 配对 |
 | `RuntimeOnly` | 只修复 `cua_node` / `node_repl` 运行时 |
 | `BrowserDiscoveryOnly` | 只修复 Browser 的 `latest` 和 `.codex-plugin` 链接 |
 | `BrowserCacheOnly` | 只恢复当前 AppX Browser cache |

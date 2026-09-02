@@ -17,6 +17,8 @@ pwsh.exe -NoProfile -NonInteractive -File "$root\scripts\Invoke-CodexDesktopQuic
 
 显式 route 仅在错误 owner 已明确时使用：`CliMirrorOnly`、`RuntimeOnly`、`BrowserDiscoveryOnly`、`BrowserCacheOnly`、`BrowserNativeHostOnly`、`EdgeNativeHostOnly`、`ChromeAppxBootstrapOnly`、`ComputerUseCacheOnly`、`TmpRuntimeMarketplaceOnly`、`Verify`。
 
+`CliMirrorOnly` 同步当前 AppX 的 `codex.exe` 与 `codex-code-mode-host.exe` 配对；Code Mode IPC 报错若发生在 probe 启动前，优先只走这条路由。
+
 `BrowserNativeHostOnly` 是热修路由：从当前 AppX 读取扩展 ID，只同步 legacy manifest、Google Chrome HKCU 映射和两份 v2 manifest，不关闭或重启 Codex、Chrome、Edge，也不修改 cache、junction、runtime、CLI mirror、配置或任务。实际写入前保留回滚副本，任一步失败即恢复原状态。
 
 `EdgeNativeHostOnly` 是独立的 Edge 注册表路径修复：仅在当前 Edge 用户配置中确实存在目标扩展、而 `HKCU\Software\Microsoft\Edge\NativeMessagingHosts` 缺失或指向错误时，将共享 native-host manifest 路径写入 Edge 键。它不改 Chrome 键、manifest、cache、junction、runtime、CLI mirror 或进程；写前保留注册表回滚副本。

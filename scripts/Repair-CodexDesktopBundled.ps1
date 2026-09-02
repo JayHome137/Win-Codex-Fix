@@ -230,6 +230,20 @@ function Find-CurrentCodexCli {
   return $null
 }
 
+function Find-CurrentCodexCodeModeHost {
+  $codexCli = Find-CurrentCodexCli
+  if (-not $codexCli) {
+    return $null
+  }
+
+  $candidate = Join-Path (Split-Path -Parent $codexCli) 'codex-code-mode-host.exe'
+  if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+    return $candidate
+  }
+
+  return $null
+}
+
 function Test-CodexDesktopRunning {
   $package = Get-AppxPackage -Name 'OpenAI.Codex' -ErrorAction SilentlyContinue |
     Sort-Object Version -Descending |
@@ -1457,13 +1471,22 @@ function Test-CodexCliFilesMatch([string]$SourceFile, [string]$DestFile) {
   )
 }
 
-function Get-CodexCliMirrorUsers([string]$MirrorPath) {
+function Get-CodexCliMirrorUsers([string]$MirrorPath, [string]$CompanionMirrorPath = '') {
+  $mirrorPaths = @($MirrorPath)
+  if ($CompanionMirrorPath) {
+    $mirrorPaths += $CompanionMirrorPath
+  }
+
   try {
     return @(
       Get-CimInstance Win32_Process -ErrorAction Stop |
         Where-Object {
-          $_.ExecutablePath -and
-          [string]::Equals([string]$_.ExecutablePath, $MirrorPath, [StringComparison]::OrdinalIgnoreCase)
+          $processPath = [string]$_.ExecutablePath
+          $processPath -and @(
+            $mirrorPaths | Where-Object {
+              [string]::Equals($processPath, [string]$_, [StringComparison]::OrdinalIgnoreCase)
+            }
+          ).Count -gt 0
         }
     )
   } catch {
@@ -1483,76 +1506,156 @@ function Test-CodexCliExecutable([string]$Path) {
 function Ensure-CodexCliMirror(
   [string]$SourceFile,
   [string]$DestFile,
-  [switch]$ReturnPendingWhenInUse
+  [switch]$ReturnPendingWhenInUse,
+  [string]$CompanionSourceFile = '',
+  [string]$CompanionDestFile = ''
 ) {
-  if (-not (Test-Path -LiteralPath $SourceFile -PathType Leaf)) {
-    throw "Current Codex CLI source is missing: $SourceFile"
+  $entries = @(
+    [pscustomobject]@{
+      Label = 'Codex CLI'
+      Source = $SourceFile
+      Destination = $DestFile
+    }
+  )
+  if ($CompanionSourceFile -or $CompanionDestFile) {
+    if (-not $CompanionSourceFile -or -not $CompanionDestFile) {
+      throw 'Codex CLI companion source and destination must be supplied together.'
+    }
+    $entries += [pscustomobject]@{
+      Label = 'Codex code-mode host'
+      Source = $CompanionSourceFile
+      Destination = $CompanionDestFile
+    }
   }
 
-  if (Test-CodexCliFilesMatch $SourceFile $DestFile) {
-    Write-Step 'Current Codex CLI managed project mirror already matches the AppX binary; no refresh is needed.'
+  foreach ($entry in $entries) {
+    if (-not (Test-Path -LiteralPath $entry.Source -PathType Leaf)) {
+      throw "Current $($entry.Label) source is missing: $($entry.Source)"
+    }
+  }
+
+  $allCurrent = $true
+  foreach ($entry in $entries) {
+    if (-not (Test-CodexCliFilesMatch $entry.Source $entry.Destination)) {
+      $allCurrent = $false
+      break
+    }
+  }
+  if ($allCurrent) {
+    $message = if ($entries.Count -gt 1) {
+      'Current Codex CLI/code-mode host managed project pair already matches the AppX binaries; no refresh is needed.'
+    } else {
+      'Current Codex CLI managed project mirror already matches the AppX binary; no refresh is needed.'
+    }
+    Write-Step $message
     return [pscustomobject]@{ Status = 'Current'; InUseCount = 0 }
   }
 
-  $mirrorUsers = @(Get-CodexCliMirrorUsers $DestFile)
+  $mirrorUsers = @(Get-CodexCliMirrorUsers $DestFile $CompanionDestFile)
   if ($mirrorUsers.Count -gt 0) {
     if ($ReturnPendingWhenInUse) {
-      Write-Step "managed Codex CLI mirror refresh is pending because $($mirrorUsers.Count) process(es) are using it. No process was stopped."
+      Write-Step "managed Codex CLI/code-mode host pair refresh is pending because $($mirrorUsers.Count) process(es) are using it. No process was stopped."
       return [pscustomobject]@{ Status = 'Pending'; InUseCount = $mirrorUsers.Count }
     }
-    throw "The current AppX CLI differs but $($mirrorUsers.Count) process(es) are using the managed project mirror. No process was stopped; retry after those processes exit."
+    throw "The current AppX CLI/code-mode host pair differs but $($mirrorUsers.Count) process(es) are using the managed project mirror. No process was stopped; retry after those processes exit."
   }
 
-  $destDirectory = Split-Path -Parent $DestFile
-  New-Item -ItemType Directory -Force -Path $destDirectory | Out-Null
-  $unique = '{0}.{1}' -f $PID, ([guid]::NewGuid().ToString('N'))
-  $stagingPath = "$DestFile.staging.$unique.exe"
-  $replacementPath = "$DestFile.replacement.$unique.exe"
-  $backupPath = "$DestFile.backup.$unique.exe"
-  $replacementCompleted = $false
+  $transactionEntries = New-Object System.Collections.Generic.List[object]
+  $transactionSucceeded = $false
 
   try {
-    Copy-FileContentOnly $SourceFile $stagingPath
-    Assert-CodexCliMirrorMatchesCurrent $SourceFile $stagingPath
-    if (-not (Test-CodexCliExecutable $stagingPath)) {
+    foreach ($entry in $entries) {
+      $destDirectory = Split-Path -Parent $entry.Destination
+      New-Item -ItemType Directory -Force -Path $destDirectory | Out-Null
+      $unique = '{0}.{1}' -f $PID, ([guid]::NewGuid().ToString('N'))
+      $staged = "$($entry.Destination).staging.$unique.exe"
+      $replacement = "$($entry.Destination).replacement.$unique.exe"
+      $backup = "$($entry.Destination).backup.$unique.exe"
+      $transactionEntries.Add([pscustomobject]@{
+          Label = $entry.Label
+          Source = $entry.Source
+          Destination = $entry.Destination
+          Staged = $staged
+          Replacement = $replacement
+          Backup = $backup
+          Existing = $false
+          Changed = $false
+        })
+
+      Copy-FileContentOnly $entry.Source $staged
+      Assert-CodexCliMirrorMatchesCurrent $entry.Source $staged
+    }
+
+    $cliStage = @($transactionEntries | Where-Object { $_.Label -eq 'Codex CLI' })[0]
+    if (-not (Test-CodexCliExecutable $cliStage.Staged)) {
       throw 'Staged Codex CLI failed the --version execution check.'
     }
 
     # Windows can keep the executable validation image mapped briefly after
-    # --version exits. Replace from a byte-identical file that was never run.
-    Copy-FileContentOnly $stagingPath $replacementPath
-    Assert-CodexCliMirrorMatchesCurrent $SourceFile $replacementPath
+    # --version exits. Replace from byte-identical files that were never run.
+    foreach ($entry in $transactionEntries) {
+      Copy-FileContentOnly $entry.Staged $entry.Replacement
+      Assert-CodexCliMirrorMatchesCurrent $entry.Source $entry.Replacement
+    }
 
-    if (Test-Path -LiteralPath $DestFile -PathType Leaf) {
-      [System.IO.File]::Replace($replacementPath, $DestFile, $backupPath, $true)
-      $replacementCompleted = $true
+    foreach ($entry in $transactionEntries) {
+      if (Test-Path -LiteralPath $entry.Destination -PathType Leaf) {
+        $entry.Existing = $true
+        [System.IO.File]::Replace($entry.Replacement, $entry.Destination, $entry.Backup, $true)
+      } else {
+        [System.IO.File]::Move($entry.Replacement, $entry.Destination)
+      }
+      $entry.Changed = $true
+    }
+
+    foreach ($entry in $transactionEntries) {
+      Assert-CodexCliMirrorMatchesCurrent $entry.Source $entry.Destination
+    }
+
+    $transactionSucceeded = $true
+    if ($entries.Count -gt 1) {
+      Write-Step 'Refreshed the managed Codex CLI/code-mode host pair through validated atomic replacements.'
     } else {
-      [System.IO.File]::Move($replacementPath, $DestFile)
+      Write-Step 'Refreshed the managed Codex CLI mirror through a validated atomic replacement.'
     }
-
-    Assert-CodexCliMirrorMatchesCurrent $SourceFile $DestFile
-    if (Test-Path -LiteralPath $backupPath -PathType Leaf) {
-      Remove-Item -LiteralPath $backupPath -Force
-    }
-    Write-Step 'Refreshed the managed Codex CLI mirror through a validated atomic replacement.'
     return [pscustomobject]@{ Status = 'Refreshed'; InUseCount = 0 }
   } catch {
     $refreshError = $_.Exception.Message
-    if ($replacementCompleted -and (Test-Path -LiteralPath $backupPath -PathType Leaf)) {
+    $rollbackErrors = New-Object System.Collections.Generic.List[string]
+    foreach ($entry in @($transactionEntries | Where-Object { $_.Changed })) {
       try {
-        [System.IO.File]::Replace($backupPath, $DestFile, $null, $true)
+        if ($entry.Existing) {
+          if (Test-Path -LiteralPath $entry.Backup -PathType Leaf) {
+            [System.IO.File]::Replace($entry.Backup, $entry.Destination, $null, $true)
+          } else {
+            throw "rollback backup is missing: $($entry.Backup)"
+          }
+        } else {
+          Remove-Item -LiteralPath $entry.Destination -Force -ErrorAction SilentlyContinue
+        }
       } catch {
-        throw "CLI mirror refresh failed and the validated old mirror could not be restored from $backupPath. Detail: $refreshError; rollback: $($_.Exception.Message)"
+        $rollbackErrors.Add("$($entry.Label): $($_.Exception.Message)")
       }
     }
-    throw "CLI mirror refresh failed; the existing mirror was preserved. Detail: $refreshError"
+    if ($rollbackErrors.Count -gt 0) {
+      throw "CLI mirror pair refresh failed and rollback was incomplete: $($rollbackErrors -join '; '). Detail: $refreshError"
+    }
+    foreach ($entry in $transactionEntries) {
+      Remove-Item -LiteralPath $entry.Backup -Force -ErrorAction SilentlyContinue
+    }
+    throw "CLI mirror pair refresh failed; the existing pair was restored. Detail: $refreshError"
   } finally {
-    foreach ($temporaryPath in @($stagingPath, $replacementPath)) {
+    foreach ($entry in $transactionEntries) {
+      foreach ($temporaryPath in @($entry.Staged, $entry.Replacement)) {
       for ($attempt = 0; $attempt -lt 20 -and (Test-Path -LiteralPath $temporaryPath -PathType Leaf); $attempt++) {
         Remove-Item -LiteralPath $temporaryPath -Force -ErrorAction SilentlyContinue
         if (Test-Path -LiteralPath $temporaryPath -PathType Leaf) {
           Start-Sleep -Milliseconds 100
         }
+      }
+    }
+      if ($transactionSucceeded) {
+        Remove-Item -LiteralPath $entry.Backup -Force -ErrorAction SilentlyContinue
       }
     }
   }
@@ -1579,6 +1682,16 @@ function Assert-CodexCliMirrorMatchesCurrent([string]$SourceFile, [string]$DestF
   }
 }
 
+function Assert-CodexCliPairMatchesCurrent(
+  [string]$SourceFile,
+  [string]$DestFile,
+  [string]$CompanionSourceFile,
+  [string]$CompanionDestFile
+) {
+  Assert-CodexCliMirrorMatchesCurrent $SourceFile $DestFile
+  Assert-CodexCliMirrorMatchesCurrent $CompanionSourceFile $CompanionDestFile
+}
+
 function Get-CodexCliMirrorRefreshState([string]$Path) {
   if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
     return $null
@@ -1596,15 +1709,21 @@ function Write-CodexCliMirrorRefreshState(
   [string]$MirrorPath,
   [string]$Phase,
   [bool]$DesktopUsedStaleMirror,
-  [int]$InUseCount
+  [int]$InUseCount,
+  [string]$CompanionSourceFile = '',
+  [string]$CompanionMirrorPath = ''
 ) {
   $state = [ordered]@{
-    schemaVersion = 1
+    schemaVersion = 2
     phase = $Phase
     appxCliPath = $SourceFile
     appxCliLength = (Get-Item -LiteralPath $SourceFile).Length
     appxCliSha256 = (Get-FileHash -LiteralPath $SourceFile -Algorithm SHA256).Hash
     mirrorPath = $MirrorPath
+    appxCodeModeHostPath = $CompanionSourceFile
+    appxCodeModeHostLength = if ($CompanionSourceFile) { (Get-Item -LiteralPath $CompanionSourceFile).Length } else { $null }
+    appxCodeModeHostSha256 = if ($CompanionSourceFile) { (Get-FileHash -LiteralPath $CompanionSourceFile -Algorithm SHA256).Hash } else { $null }
+    codeModeHostMirrorPath = $CompanionMirrorPath
     desktopUsedStaleMirror = $DesktopUsedStaleMirror
     inUseCount = $InUseCount
     recordedAtUtc = (Get-Date).ToUniversalTime().ToString('o')
@@ -1751,8 +1870,13 @@ function Ensure-OfficialBundledMarketplace([string]$WindowsAppsSource) {
   if (-not $codexCliSource) {
     throw 'The current Codex AppX CLI was not found.'
   }
-  Ensure-CodexCliMirror $codexCliSource $codexCliMirror
-  Assert-CodexCliMirrorMatchesCurrent $codexCliSource $codexCliMirror
+  $codeModeHostSource = Find-CurrentCodexCodeModeHost
+  if (-not $codeModeHostSource) {
+    throw 'The current Codex AppX code-mode host was not found.'
+  }
+  $codeModeHostMirror = Join-Path (Split-Path -Parent $codexCliMirror) 'codex-code-mode-host.exe'
+  Ensure-CodexCliMirror $codexCliSource $codexCliMirror -CompanionSourceFile $codeModeHostSource -CompanionDestFile $codeModeHostMirror
+  Assert-CodexCliPairMatchesCurrent $codexCliSource $codexCliMirror $codeModeHostSource $codeModeHostMirror
   Ensure-UserCodexCliPath $codexCliMirror | Out-Null
   $codexCli = $codexCliMirror
   Write-Step "Using the current Codex CLI managed project mirror: $codexCli"
@@ -2530,19 +2654,40 @@ if ($CliMirrorOnly) {
   }
 
   $codexCliMirror = Join-Path $RepairRoot 'state\codex-cli\codex.exe'
+  $codeModeHostSource = Find-CurrentCodexCodeModeHost
+  if (-not $codeModeHostSource) {
+    throw 'The current registered Codex AppX code-mode host was not found.'
+  }
+  $codeModeHostMirror = Join-Path (Split-Path -Parent $codexCliMirror) 'codex-code-mode-host.exe'
   $mirrorStatePath = Join-Path $RepairRoot 'state\codex-cli\mirror-refresh-state.json'
   $sourceHash = (Get-FileHash -LiteralPath $codexCliSource -Algorithm SHA256).Hash
+  $codeModeHostSourceHash = (Get-FileHash -LiteralPath $codeModeHostSource -Algorithm SHA256).Hash
   $previousState = Get-CodexCliMirrorRefreshState $mirrorStatePath
-  $previousStateMatches = $previousState -and [string]$previousState.appxCliSha256 -eq $sourceHash
+  $previousCodeModeHostHash = if (
+    $previousState -and
+    $previousState.PSObject.Properties['appxCodeModeHostSha256']
+  ) {
+    [string]$previousState.appxCodeModeHostSha256
+  } else {
+    ''
+  }
+  $previousStateMatches = $previousState -and
+    [string]$previousState.appxCliSha256 -eq $sourceHash -and
+    $previousCodeModeHostHash -eq $codeModeHostSourceHash
   $desktopUsedStaleMirror = (Test-CodexDesktopRunning) -or (
     $previousStateMatches -and [bool]$previousState.desktopUsedStaleMirror
   )
 
-  $result = Ensure-CodexCliMirror $codexCliSource $codexCliMirror -ReturnPendingWhenInUse
+  $result = Ensure-CodexCliMirror `
+    $codexCliSource `
+    $codexCliMirror `
+    -ReturnPendingWhenInUse `
+    -CompanionSourceFile $codeModeHostSource `
+    -CompanionDestFile $codeModeHostMirror
   if ($result.Status -eq 'Pending') {
     Write-CodexCliMirrorRefreshState `
       $mirrorStatePath $codexCliSource $codexCliMirror 'pending-cli-mirror-refresh' `
-      $desktopUsedStaleMirror $result.InUseCount
+      $desktopUsedStaleMirror $result.InUseCount $codeModeHostSource $codeModeHostMirror
     exit 30
   }
 
@@ -2550,7 +2695,7 @@ if ($CliMirrorOnly) {
     if ($desktopUsedStaleMirror) {
       Write-CodexCliMirrorRefreshState `
         $mirrorStatePath $codexCliSource $codexCliMirror 'cli-mirror-refreshed-pending-desktop-restart' `
-        $true 0
+        $true 0 $codeModeHostSource $codeModeHostMirror
     } else {
       Remove-Item -LiteralPath $mirrorStatePath -Force -ErrorAction SilentlyContinue
     }
@@ -2638,7 +2783,12 @@ if ($ChromeAppxBootstrapOnly) {
   if (-not $codexCliSource) {
     throw 'ChromeAppxBootstrapOnly could not resolve the current AppX CLI.'
   }
-  Assert-CodexCliMirrorMatchesCurrent $codexCliSource $codexCliPath
+  $codeModeHostSource = Find-CurrentCodexCodeModeHost
+  if (-not $codeModeHostSource) {
+    throw 'ChromeAppxBootstrapOnly could not resolve the current AppX code-mode host.'
+  }
+  $codeModeHostMirror = Join-Path (Split-Path -Parent $codexCliPath) 'codex-code-mode-host.exe'
+  Assert-CodexCliPairMatchesCurrent $codexCliSource $codexCliPath $codeModeHostSource $codeModeHostMirror
   $nodePath = Join-Path $runtimeBin 'node.exe'
   $nodeReplPath = Join-Path $runtimeBin 'node_repl.exe'
   $installScript = Join-Path (Join-Path $chromeRoot $chromeVersion) 'scripts\installManifest.mjs'

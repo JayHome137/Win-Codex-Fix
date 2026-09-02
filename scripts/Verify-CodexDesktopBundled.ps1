@@ -709,6 +709,20 @@ function Find-CurrentAppxCodexCli {
   return $null
 }
 
+function Find-CurrentAppxCodexCodeModeHost {
+  $codexCli = Find-CurrentAppxCodexCli
+  if (-not $codexCli) {
+    return $null
+  }
+
+  $candidate = Join-Path (Split-Path -Parent $codexCli) 'codex-code-mode-host.exe'
+  if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+    return $candidate
+  }
+
+  return $null
+}
+
 function Get-CodexCliEnvironmentState([string]$ExpectedPath) {
   $userValue = [Environment]::GetEnvironmentVariable('CODEX_CLI_PATH', [EnvironmentVariableTarget]::User)
   $machineValue = [Environment]::GetEnvironmentVariable('CODEX_CLI_PATH', [EnvironmentVariableTarget]::Machine)
@@ -1085,6 +1099,7 @@ $PluginCacheRoot = Join-Path $CodexHome 'plugins\cache\openai-bundled'
 $ConfigPath = Join-Path $CodexHome 'config.toml'
 $ExtensionManifest = Join-Path $env:LOCALAPPDATA 'OpenAI\extension\com.openai.codexextension.json'
 $CodexCliMirror = Join-Path $RepairRoot 'state\codex-cli\codex.exe'
+$CodexCodeModeHostMirror = Join-Path (Split-Path -Parent $CodexCliMirror) 'codex-code-mode-host.exe'
 $CurrentCodexPackage = Get-AppxPackage -Name 'OpenAI.Codex' -ErrorAction SilentlyContinue |
   Sort-Object Version -Descending |
   Select-Object -First 1
@@ -1390,9 +1405,14 @@ if (Test-Path -LiteralPath $ConfigPath) {
 }
 
 $CurrentAppxCodexCli = Find-CurrentAppxCodexCli
+$CurrentAppxCodexCodeModeHost = Find-CurrentAppxCodexCodeModeHost
 Write-Check 'current AppX Codex CLI found' ($null -ne $CurrentAppxCodexCli) $CurrentAppxCodexCli
+$currentAppxCodeModeHostExists = $null -ne $CurrentAppxCodexCodeModeHost
+Write-Check 'current AppX code-mode host found' $currentAppxCodeModeHostExists $CurrentAppxCodexCodeModeHost
 $codexCliMirrorExists = Test-Path -LiteralPath $CodexCliMirror -PathType Leaf
 Write-Check 'managed Codex CLI mirror exists' $codexCliMirrorExists $CodexCliMirror
+$codeModeHostMirrorExists = Test-Path -LiteralPath $CodexCodeModeHostMirror -PathType Leaf
+Write-Check 'managed code-mode host mirror exists' $codeModeHostMirrorExists $CodexCodeModeHostMirror
 
 $codexCliMirrorLengthMatches = $false
 $codexCliMirrorHashMatches = $false
@@ -1416,6 +1436,26 @@ if (
 }
 Write-Check 'managed Codex CLI mirror length matches current AppX' $codexCliMirrorLengthMatches $CodexCliMirror
 Write-Check 'managed Codex CLI mirror SHA-256 matches current AppX' $codexCliMirrorHashMatches $CodexCliMirror
+
+$codeModeHostMirrorLengthMatches = $false
+$codeModeHostMirrorHashMatches = $false
+if ($CurrentAppxCodexCodeModeHost -and $codeModeHostMirrorExists) {
+  try {
+    $codeModeHostMirrorLengthMatches = (
+      (Get-Item -LiteralPath $CurrentAppxCodexCodeModeHost).Length -eq
+      (Get-Item -LiteralPath $CodexCodeModeHostMirror).Length
+    )
+    $codeModeHostMirrorHashMatches = (
+      (Get-FileHash -LiteralPath $CurrentAppxCodexCodeModeHost -Algorithm SHA256).Hash -eq
+      (Get-FileHash -LiteralPath $CodexCodeModeHostMirror -Algorithm SHA256).Hash
+    )
+  } catch {
+    $codeModeHostMirrorLengthMatches = $false
+    $codeModeHostMirrorHashMatches = $false
+  }
+}
+Write-Check 'managed code-mode host mirror length matches current AppX' $codeModeHostMirrorLengthMatches $CodexCodeModeHostMirror
+Write-Check 'managed code-mode host mirror SHA-256 matches current AppX' $codeModeHostMirrorHashMatches $CodexCodeModeHostMirror
 
 $codexCliEnvironmentState = Get-CodexCliEnvironmentState $CodexCliMirror
 Write-Check 'User-level CODEX_CLI_PATH matches managed Codex CLI mirror' $codexCliEnvironmentState.UserMatches $CodexCliMirror

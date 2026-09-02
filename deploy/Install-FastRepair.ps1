@@ -66,6 +66,7 @@ $projectFiles = @(
   'tests\Test-ChromeAppxBootstrap.ps1',
   'tests\Test-ComputerUseCache.ps1',
   'tests\Test-EdgeNativeHost.ps1',
+  'tests\Test-CliMirrorPair.ps1',
   'docs\quick-repair.md',
   '.github\ISSUE_TEMPLATE\bug-report.md'
 )
