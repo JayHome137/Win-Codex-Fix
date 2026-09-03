@@ -136,7 +136,7 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File .\deploy\Install-FastRepair.ps
 | `ChromeAppServerBootstrapOnly` | 处理 `nodePath` 等 app-server 路径错误；直接用当前 AppX Chrome 和官方 `installManifest.mjs` 重建 bootstrap 链 |
 | `ChromeAppxBootstrapOnly` | `ChromeAppServerBootstrapOnly` 的兼容旧名 |
 | `ComputerUseCacheOnly` | 不经过 marketplace，直接用当前 AppX 同步 Computer Use 插件 cache 与发现链接；不修改 `cua_node` 运行时 |
-| `TmpRuntimeMarketplaceOnly` | 只处理已确认的旧临时 marketplace junction |
+| `TmpRuntimeMarketplaceOnly` | 只刷新已确认落后于当前 AppX 的 `.tmp\bundled-marketplaces\openai-bundled` 主机临时副本；需要 Codex 稳定退出 |
 | `Verify` | 只运行 Quick verifier，不写入 |
 
 `ChromeAppServerBootstrapOnly`（旧名 `ChromeAppxBootstrapOnly`）只验证 Chrome app-server 链路本身：当前 AppX 文件集、cache 发现链接、官方 sidecar、legacy/v2 Native Host 和 HKCU 映射。Browser、Computer Use、CLI mirror 或 marketplace 的其它失败会单独报告，不会被伪装成“全部修复”。

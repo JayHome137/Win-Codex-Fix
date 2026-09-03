@@ -1223,10 +1223,14 @@ if ($tmpRuntimeMarketplaceItem) {
   $tmpRuntimeMarketplaceCurrent = $true
   $tmpRuntimeMarketplaceDetail = "$TmpRuntimeMarketplace host scratch is not materialized"
 }
-if ($bundledMarketplaceActive) {
+if ($tmpRuntimeMarketplaceItem) {
+  # The Desktop host can still materialize this scratch marketplace even when
+  # the CLI does not register openai-bundled. A stale physical copy must not be
+  # hidden behind the CLI registration state, otherwise the UI can load an old
+  # unified-computer-use plugin while the static cache looks healthy.
   Write-Check 'tmp runtime marketplace host-owned and current' $tmpRuntimeMarketplaceCurrent $tmpRuntimeMarketplaceDetail
 } else {
-  Write-Info 'tmp runtime marketplace' 'not used by the current AppX plugin flow'
+  Write-Info 'tmp runtime marketplace' 'host scratch is not materialized'
 }
 
 $browserAppxSource = if ($LatestWindowsAppsBundledSource) { Join-Path $LatestWindowsAppsBundledSource 'plugins\browser' } else { $null }

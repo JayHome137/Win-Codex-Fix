@@ -17,7 +17,7 @@ pwsh.exe -NoProfile -NonInteractive -File "$root\scripts\Invoke-CodexDesktopQuic
 
 如果占用者已经自然退出，直接重跑同一路由，不使用 `-ArmAfterExit`。任何 `manual-required`、`selected route failed` 或无法确认唯一 owner 的结果，都要明确提示未完成并停止。
 
-显式 route 仅在错误 owner 已明确时使用：`CliMirrorOnly`、`RuntimeOnly`、`BrowserDiscoveryOnly`、`BrowserCacheOnly`、`BrowserNativeHostOnly`、`EdgeNativeHostOnly`、`ChromeAppServerBootstrapOnly`、`ComputerUseCacheOnly`、`TmpRuntimeMarketplaceOnly`、`Verify`。`ChromeAppxBootstrapOnly` 保留为兼容旧名。
+显式 route 仅在错误 owner 已明确时使用：`CliMirrorOnly`、`RuntimeOnly`、`BrowserDiscoveryOnly`、`BrowserCacheOnly`、`BrowserNativeHostOnly`、`EdgeNativeHostOnly`、`ChromeAppServerBootstrapOnly`、`ComputerUseCacheOnly`、`TmpRuntimeMarketplaceOnly`、`Verify`。`ChromeAppxBootstrapOnly` 保留为兼容旧名。`TmpRuntimeMarketplaceOnly` 只在 Codex 稳定退出后刷新落后的 `.tmp\\bundled-marketplaces\\openai-bundled` 主机副本。
 
 `CliMirrorOnly` 同步当前 AppX 的 `codex.exe` 与 `codex-code-mode-host.exe` 配对；Code Mode IPC 报错若发生在 probe 启动前，优先只走这条路由。
 

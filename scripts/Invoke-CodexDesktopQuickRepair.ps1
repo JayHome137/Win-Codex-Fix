@@ -139,6 +139,8 @@ if ($failureText -match '(?i)code-mode-host|CLI mirror|codex-cli') {
   $selectedRoute = 'ChromeAppxBootstrapOnly'
 } elseif ($failureText -match '(?i)computer-use (?:plugin metadata|latest|metadata)|Computer Use plugin-cache') {
   $selectedRoute = 'ComputerUseCacheOnly'
+} elseif ($failureText -match '(?i)tmp runtime marketplace') {
+  $selectedRoute = 'TmpRuntimeMarketplaceOnly'
 } elseif ($failureText -match '(?i)browser|plugin discovery|browser-client') {
   $selectedRoute = 'BrowserCacheOnly'
 } elseif ($failureText -match '(?i)edge native host|Microsoft\\Edge\\NativeMessagingHosts') {

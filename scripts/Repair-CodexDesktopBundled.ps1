@@ -1839,6 +1839,43 @@ function Remove-TmpRuntimeMarketplaceJunction([string]$RuntimePath, [string]$Exp
   }
 }
 
+function Test-TmpRuntimeMarketplaceCompatible([string]$ActualRoot, [string]$ExpectedRoot) {
+  try {
+    $actualManifestPath = Join-Path $ActualRoot '.agents\plugins\marketplace.json'
+    $expectedManifestPath = Join-Path $ExpectedRoot '.agents\plugins\marketplace.json'
+    if ((-not (Test-Path -LiteralPath $actualManifestPath -PathType Leaf)) -or
+        (-not (Test-Path -LiteralPath $expectedManifestPath -PathType Leaf))) {
+      return $false
+    }
+
+    $actualManifest = Get-Content -LiteralPath $actualManifestPath -Raw | ConvertFrom-Json
+    $expectedManifest = Get-Content -LiteralPath $expectedManifestPath -Raw | ConvertFrom-Json
+    $expectedPlugins = @($expectedManifest.plugins | ForEach-Object { [string]$_.name } | Sort-Object)
+    $actualPlugins = @($actualManifest.plugins | ForEach-Object { [string]$_.name } | Sort-Object)
+    if (($expectedPlugins -join "`n") -ne ($actualPlugins -join "`n")) {
+      return $false
+    }
+
+    foreach ($name in $expectedPlugins) {
+      $actualJson = Join-Path $ActualRoot "plugins\$name\.codex-plugin\plugin.json"
+      $expectedJson = Join-Path $ExpectedRoot "plugins\$name\.codex-plugin\plugin.json"
+      if ((-not (Test-Path -LiteralPath $actualJson -PathType Leaf)) -or
+          (-not (Test-Path -LiteralPath $expectedJson -PathType Leaf))) {
+        return $false
+      }
+      $actualVersion = [string](Get-Content -LiteralPath $actualJson -Raw | ConvertFrom-Json).version
+      $expectedVersion = [string](Get-Content -LiteralPath $expectedJson -Raw | ConvertFrom-Json).version
+      if (-not $expectedVersion -or $actualVersion -ne $expectedVersion) {
+        return $false
+      }
+    }
+
+    return $true
+  } catch {
+    return $false
+  }
+}
+
 function Invoke-CodexCliJson([string]$CodexCliPath, [string[]]$Arguments, [string]$Label) {
   $raw = (& $CodexCliPath @Arguments 2>&1 | Out-String).Trim()
   $exitCode = $LASTEXITCODE
@@ -3257,12 +3294,61 @@ if ($BrowserDiscoveryOnly) {
 
 if ($TmpRuntimeMarketplaceOnly) {
   if (Test-CodexDesktopRunning) {
-    throw 'Codex Desktop is running. The tmp runtime marketplace junction can be changed only after a stable Desktop exit.'
+    throw 'Codex Desktop is running. The tmp runtime marketplace can be changed only after a stable Desktop exit.'
+  }
+
+  $currentPackage = Get-AppxPackage -Name 'OpenAI.Codex' -ErrorAction SilentlyContinue |
+    Sort-Object Version -Descending |
+    Select-Object -First 1
+  if (-not $currentPackage) {
+    throw 'TmpRuntimeMarketplaceOnly could not resolve the current registered Codex AppX package.'
+  }
+
+  $installLocation = [string]$currentPackage.InstallLocation
+  $bundledSource = Join-Path $installLocation 'app\resources\plugins\openai-bundled'
+  if (-not (Test-AppxBlockMapTreeComplete $installLocation $bundledSource 'app\resources\plugins\openai-bundled\')) {
+    throw 'TmpRuntimeMarketplaceOnly stopped: current AppX bundled source failed AppxBlockMap validation.'
   }
 
   $tmpRuntimeMarketplace = Join-Path $CodexHome '.tmp\bundled-marketplaces\openai-bundled'
-  Remove-TmpRuntimeMarketplaceJunction $tmpRuntimeMarketplace $PersistentBundledMarketplaceRoot
-  Write-Step 'Targeted tmp runtime marketplace ownership repair complete.'
+  $item = Get-Item -LiteralPath $tmpRuntimeMarketplace -Force -ErrorAction SilentlyContinue
+  if (-not $item) {
+    Write-Step 'Tmp runtime marketplace is already absent; current AppX will be used on next startup.'
+    exit 0
+  }
+  if (-not $item.PSIsContainer) {
+    throw "Refusing to change non-directory tmp runtime marketplace: $tmpRuntimeMarketplace"
+  }
+  if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+    Remove-TmpRuntimeMarketplaceJunction $tmpRuntimeMarketplace $PersistentBundledMarketplaceRoot
+    Write-Step 'Removed legacy tmp runtime marketplace junction; current AppX will be used on next startup.'
+    exit 0
+  }
+
+  if (Test-TmpRuntimeMarketplaceCompatible $tmpRuntimeMarketplace $bundledSource) {
+    Write-Step "Tmp runtime marketplace already matches current AppX: $tmpRuntimeMarketplace"
+    exit 0
+  }
+
+  $staging = "$tmpRuntimeMarketplace.repair-$Stamp"
+  try {
+    Write-Step "Refreshing stale physical tmp runtime marketplace from AppX $($currentPackage.Version)."
+    Copy-TreeContentOnly $bundledSource $staging
+    if (-not (Test-AppxBlockMapTreeComplete $installLocation $staging 'app\resources\plugins\openai-bundled\')) {
+      throw 'TmpRuntimeMarketplaceOnly staging failed AppxBlockMap validation.'
+    }
+    Remove-Item -LiteralPath $tmpRuntimeMarketplace -Recurse -Force
+    Move-Item -LiteralPath $staging -Destination $tmpRuntimeMarketplace -Force
+  } finally {
+    if (Test-Path -LiteralPath $staging) {
+      Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue
+    }
+  }
+
+  if (-not (Test-TmpRuntimeMarketplaceCompatible $tmpRuntimeMarketplace $bundledSource)) {
+    throw 'TmpRuntimeMarketplaceOnly post-write version verification failed.'
+  }
+  Write-Step "Targeted tmp runtime marketplace refresh complete: AppX=$($currentPackage.Version)."
   exit 0
 }
 

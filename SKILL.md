@@ -19,7 +19,7 @@ description: Windows Codex Desktop 更新后的快速、一次性热修。按验
 - `EdgeNativeHostOnly`：仅在当前 Edge profile 确实安装了目标扩展、且 Edge 专用 HKCU NativeMessagingHosts 键缺失或漂移时，单独补齐 Edge 注册表映射；不改 Chrome 键、共享 manifest、缓存、runtime 或进程。
 - `ChromeAppServerBootstrapOnly`：处理 `nodePath`、`resourcesPath`、`nodeModuleDirs`、`nodeReplPath` 或 `node_repl` 报错；从当前 AppX 重建 Chrome app-server bootstrap 链。`ChromeAppxBootstrapOnly` 是同一路由的兼容旧名；不触碰 Browser/Computer Use cache，不关闭 Codex、Chrome 或 Edge。
 - `ComputerUseCacheOnly`：绕过 marketplace，直接从当前 AppX 同步 Computer Use 插件 cache 与发现链接；不修改 `cua_node` 运行时、配置或其它插件。
-- `TmpRuntimeMarketplaceOnly`：只修复已确认的旧临时 marketplace 所有权问题。
+- `TmpRuntimeMarketplaceOnly`：只刷新已确认落后于当前 AppX 的 `.tmp\bundled-marketplaces\openai-bundled` 主机临时副本；需要 Codex Desktop 稳定退出，完成后再启动一次让新插件生效。
 - `Verify`：只运行一次 Quick verifier。
 
 不要手工把多个路由串在一起。`Auto` 遇到上述 app-server 路径或 `node_repl` 错误时选择 `ChromeAppServerBootstrapOnly`；无法识别唯一 owner 时返回 `manual-required`，不猜测、不升级为全量修复。
