@@ -1196,9 +1196,14 @@ function Assert-BrowserCacheOnlyProcessQuiescence([string]$BrowserRoot, [string]
 }
 
 function New-BrowserCacheOnlyProcessGuard([string]$BrowserRoot, [string]$CodexCliMirror) {
+  # Capture the assertion scriptblock explicitly. A closure created with
+  # GetNewClosure() does not reliably resolve functions from the temporary
+  # script scope on Windows PowerShell, so calling the function by name here
+  # can fail after the preflight has already passed.
+  $assertNoBlockers = ${function:Assert-BrowserCacheOnlyNoBlockers}
   return {
     param([string]$Phase, [string]$RelativePath)
-    Assert-BrowserCacheOnlyNoBlockers $BrowserRoot $CodexCliMirror
+    & $assertNoBlockers $BrowserRoot $CodexCliMirror
   }.GetNewClosure()
 }
 

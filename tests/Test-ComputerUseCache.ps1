@@ -25,5 +25,7 @@ Assert-True ($verify -match '\[switch\]\$ComputerUseCacheOnly') 'Computer Use ve
 Assert-True ($afterExit -match 'ComputerUseCacheOnly') 'After-exit route contract is missing'
 Assert-True ($verify -notmatch 'computer-use client') 'Verifier still requires removed computer-use client artifact'
 Assert-True ($verify -match 'current CLI does not register openai-bundled') 'Verifier does not recognise the AppX-owned plugin flow'
+Assert-True ($repair -match '\$assertNoBlockers\s*=\s*\$\{function:Assert-BrowserCacheOnlyNoBlockers\}') 'Browser cache guard does not capture its assertion scriptblock'
+Assert-True ($repair -match '&\s*\$assertNoBlockers\s+\$BrowserRoot\s+\$CodexCliMirror') 'Browser cache guard closure does not invoke the captured assertion'
 
 Write-Host '[PASS] ComputerUseCache focused contract passed.'

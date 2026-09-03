@@ -150,6 +150,7 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File .\deploy\Install-FastRepair.ps
 - 默认不关闭、不强杀、不 reload、不重启 Codex、Chrome 或 Edge。
 - 大多数版本漂移可以在应用保持运行时完成热修。
 - 只有输出明确返回 `pending-natural-exit`（或退出码 `20` / `30`）并指出目标文件被占用时，才需要关闭对应 owner。
+- 如果当前路由不具备热修条件，必须明确提示“当前路由无法热修”，列出实际占用者、需要退出的对象和下一步；等待或失败不能描述为已修复。
 - 获得明确授权后，`-ArmAfterExit` 只绑定当时实际占用的 PID；该 PID 自然退出后自动重跑同一路由并删除一次性任务。
 - 普通关闭 Codex 不会误触发修复，也不会创建长期轮询任务。
 

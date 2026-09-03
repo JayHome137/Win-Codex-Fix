@@ -2,7 +2,7 @@
 
 1. 在 Codex 外的 PowerShell 7 执行维护项目中的 `scripts\Invoke-CodexDesktopQuickRepair.ps1 -Route Auto` 一次。
 2. 输出 `current state is already healthy`：结束，不重启。
-3. 输出 `pending-natural-exit`：先取得明确授权，再对同一路由加 `-ArmAfterExit`；不要手动重复执行。
+3. 输出 `pending-natural-exit`：必须提示“当前路由无法热修”并指出实际占用者；先取得明确授权，再对同一路由加 `-ArmAfterExit`；不要手动重复执行。
 4. 输出 `repair and quick verification passed`：结束；Codex、Chrome、Edge 保持当前状态。
 5. 输出 `manual-required` 或 `selected route failed`：停止并保留现场，不叠加其它修复。
 
@@ -14,6 +14,8 @@ pwsh.exe -NoProfile -NonInteractive -File "$root\scripts\Invoke-CodexDesktopQuic
 ```
 
 续跑会绑定当前实际占用者，等待退出事件，自动执行一次同一路由并删除自身任务；未授权时不会创建任务。
+
+如果占用者已经自然退出，直接重跑同一路由，不使用 `-ArmAfterExit`。任何 `manual-required`、`selected route failed` 或无法确认唯一 owner 的结果，都要明确提示未完成并停止。
 
 显式 route 仅在错误 owner 已明确时使用：`CliMirrorOnly`、`RuntimeOnly`、`BrowserDiscoveryOnly`、`BrowserCacheOnly`、`BrowserNativeHostOnly`、`EdgeNativeHostOnly`、`ChromeAppServerBootstrapOnly`、`ComputerUseCacheOnly`、`TmpRuntimeMarketplaceOnly`、`Verify`。`ChromeAppxBootstrapOnly` 保留为兼容旧名。
 
