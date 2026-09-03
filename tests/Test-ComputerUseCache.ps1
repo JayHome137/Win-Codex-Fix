@@ -27,5 +27,6 @@ Assert-True ($verify -notmatch 'computer-use client') 'Verifier still requires r
 Assert-True ($verify -match 'current CLI does not register openai-bundled') 'Verifier does not recognise the AppX-owned plugin flow'
 Assert-True ($repair -match '\$assertNoBlockers\s*=\s*\$\{function:Assert-BrowserCacheOnlyNoBlockers\}') 'Browser cache guard does not capture its assertion scriptblock'
 Assert-True ($repair -match '&\s*\$assertNoBlockers\s+\$BrowserRoot\s+\$CodexCliMirror') 'Browser cache guard closure does not invoke the captured assertion'
+Assert-True ($quick -match '当前路由无法热修') 'Quick repair does not expose the non-hot-repair prompt'
 
 Write-Host '[PASS] ComputerUseCache focused contract passed.'

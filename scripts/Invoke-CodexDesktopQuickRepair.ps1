@@ -155,7 +155,7 @@ if (-not $selectedRoute) {
 Write-Host "[codex-quick] selected route=$selectedRoute"
 $repairResult = Invoke-Target $selectedRoute
 if ($repairResult -eq 30 -or $repairResult -eq 20) {
-  Write-Host "[codex-quick] hot-repair unavailable for route=${selectedRoute}: the selected file owner is active. Close only the reported owner after authorization, then rerun this same route."
+  Write-Host "[codex-quick] 当前路由无法热修 / hot-repair unavailable for route=${selectedRoute}: the selected file owner is active. Close only the reported owner after authorization, then rerun this same route."
   Write-Host '[codex-quick] pending-natural-exit: no process was stopped and no fallback route will run.'
   exit $repairResult
 }
