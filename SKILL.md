@@ -17,12 +17,12 @@ description: Windows Codex Desktop 更新后的快速、一次性热修。按验
 - `BrowserCacheOnly`：只恢复当前 AppX Browser cache。
 - `BrowserNativeHostOnly`：以当前 AppX 的复数扩展 ID 为真源，只修复 legacy manifest、Chrome HKCU 映射和两份 v2 manifest；默认热修，不关闭 Codex、Chrome 或 Edge。写入前保留同一事务的回滚副本，任一步失败即恢复。
 - `EdgeNativeHostOnly`：仅在当前 Edge profile 确实安装了目标扩展、且 Edge 专用 HKCU NativeMessagingHosts 键缺失或漂移时，单独补齐 Edge 注册表映射；不改 Chrome 键、共享 manifest、缓存、runtime 或进程。
-- `ChromeAppxBootstrapOnly`：绕过已保留的 `openai-bundled` marketplace 名称，直接从当前 AppX 物化 Chrome cache，并调用 AppX 自带的 `installManifest.mjs` 重建 sidecar、legacy manifest、HKCU 映射，再更新 v2 manifest；不触碰 Browser/Computer Use cache，不关闭 Codex、Chrome 或 Edge。
+- `ChromeAppServerBootstrapOnly`：处理 `nodePath`、`resourcesPath`、`nodeModuleDirs`、`nodeReplPath` 或 `node_repl` 报错；从当前 AppX 重建 Chrome app-server bootstrap 链。`ChromeAppxBootstrapOnly` 是同一路由的兼容旧名；不触碰 Browser/Computer Use cache，不关闭 Codex、Chrome 或 Edge。
 - `ComputerUseCacheOnly`：绕过 marketplace，直接从当前 AppX 同步 Computer Use 插件 cache 与发现链接；不修改 `cua_node` 运行时、配置或其它插件。
 - `TmpRuntimeMarketplaceOnly`：只修复已确认的旧临时 marketplace 所有权问题。
 - `Verify`：只运行一次 Quick verifier。
 
-不要手工把多个路由串在一起。`Auto` 无法从 verifier 输出识别唯一 owner 时返回 `manual-required`，不猜测、不升级为全量修复。
+不要手工把多个路由串在一起。`Auto` 遇到上述 app-server 路径或 `node_repl` 错误时选择 `ChromeAppServerBootstrapOnly`；无法识别唯一 owner 时返回 `manual-required`，不猜测、不升级为全量修复。
 
 ## Code Mode IPC 边界
 

@@ -15,7 +15,7 @@ pwsh.exe -NoProfile -NonInteractive -File "$root\scripts\Invoke-CodexDesktopQuic
 
 续跑会绑定当前实际占用者，等待退出事件，自动执行一次同一路由并删除自身任务；未授权时不会创建任务。
 
-显式 route 仅在错误 owner 已明确时使用：`CliMirrorOnly`、`RuntimeOnly`、`BrowserDiscoveryOnly`、`BrowserCacheOnly`、`BrowserNativeHostOnly`、`EdgeNativeHostOnly`、`ChromeAppxBootstrapOnly`、`ComputerUseCacheOnly`、`TmpRuntimeMarketplaceOnly`、`Verify`。
+显式 route 仅在错误 owner 已明确时使用：`CliMirrorOnly`、`RuntimeOnly`、`BrowserDiscoveryOnly`、`BrowserCacheOnly`、`BrowserNativeHostOnly`、`EdgeNativeHostOnly`、`ChromeAppServerBootstrapOnly`、`ComputerUseCacheOnly`、`TmpRuntimeMarketplaceOnly`、`Verify`。`ChromeAppxBootstrapOnly` 保留为兼容旧名。
 
 `CliMirrorOnly` 同步当前 AppX 的 `codex.exe` 与 `codex-code-mode-host.exe` 配对；Code Mode IPC 报错若发生在 probe 启动前，优先只走这条路由。
 
@@ -23,6 +23,6 @@ pwsh.exe -NoProfile -NonInteractive -File "$root\scripts\Invoke-CodexDesktopQuic
 
 `EdgeNativeHostOnly` 是独立的 Edge 注册表路径修复：仅在当前 Edge 用户配置中确实存在目标扩展、而 `HKCU\Software\Microsoft\Edge\NativeMessagingHosts` 缺失或指向错误时，将共享 native-host manifest 路径写入 Edge 键。它不改 Chrome 键、manifest、cache、junction、runtime、CLI mirror 或进程；写前保留注册表回滚副本。
 
-`ChromeAppxBootstrapOnly` 是另一条独立路径：直接使用当前 AppX Chrome 文件和其自带的 `installManifest.mjs`，重建 Chrome cache、`latest`/`.codex-plugin` 发现链接、sidecar、legacy manifest、HKCU 映射和 v2 manifest，不调用 marketplace add/remove，也不触碰 Browser/Computer Use cache。成功后只验证这条 Chrome 链路；其它层的失败不会被伪装成整体修复。
+`ChromeAppServerBootstrapOnly` 是另一条独立路径（旧名 `ChromeAppxBootstrapOnly`）：直接使用当前 AppX Chrome 文件和其自带的 `installManifest.mjs`，重建 Chrome app-server bootstrap 链，不调用 marketplace add/remove，也不触碰 Browser/Computer Use cache。成功后只验证这条 Chrome 链路；其它层的失败不会被伪装成整体修复。
 
 `ComputerUseCacheOnly` 是独立的 AppX 直同步路径：只同步当前 Computer Use 插件实体目录和 `latest`/`.codex-plugin` 链接，不修改 `cua_node` 运行时、`config.toml` 或 marketplace。

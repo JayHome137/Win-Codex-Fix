@@ -4,6 +4,7 @@ param(
   [switch]$ChromeAppxBootstrapOnly,
   [switch]$ComputerUseCacheOnly,
   [switch]$EdgeNativeHostOnly,
+  [switch]$ChromeAppServerBootstrapOnly,
   [switch]$LibraryOnly
 )
 
@@ -11,6 +12,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $RepairRoot = Split-Path -Parent $PSScriptRoot
+$chromeBootstrapOnly = $ChromeAppxBootstrapOnly -or $ChromeAppServerBootstrapOnly
 
 $ChromeOpaqueTextLibrary = Join-Path $PSScriptRoot 'ChromeOpaqueTextMaterialization.ps1'
 if (-not (Test-Path -LiteralPath $ChromeOpaqueTextLibrary -PathType Leaf)) {
@@ -1110,7 +1112,7 @@ $BundledSource = if ($LatestWindowsAppsBundledSource) {
 } else {
   Find-BundledSource
 }
-if ($ChromeAppxBootstrapOnly) {
+if ($chromeBootstrapOnly) {
   Write-ChromeAppxBootstrapChecks `
     $CurrentCodexPackage `
     $LatestWindowsAppsBundledSource `

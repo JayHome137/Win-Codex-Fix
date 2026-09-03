@@ -6,6 +6,7 @@ param(
   [switch]$BrowserNativeHostOnly,
   [switch]$EdgeNativeHostOnly,
   [switch]$ChromeAppxBootstrapOnly,
+  [switch]$ChromeAppServerBootstrapOnly,
   [switch]$ComputerUseCacheOnly,
   [switch]$TmpRuntimeMarketplaceOnly,
   [switch]$AutomaticPostUpdate,
@@ -16,6 +17,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $RepairRoot = Split-Path -Parent $PSScriptRoot
+$chromeBootstrapOnly = $ChromeAppxBootstrapOnly -or $ChromeAppServerBootstrapOnly
 
 $ChromeOpaqueTextLibrary = Join-Path $PSScriptRoot 'ChromeOpaqueTextMaterialization.ps1'
 if (-not (Test-Path -LiteralPath $ChromeOpaqueTextLibrary -PathType Leaf)) {
@@ -30,10 +32,10 @@ if (-not (Test-Path -LiteralPath $BrowserNativeHostLibrary -PathType Leaf)) {
 . $BrowserNativeHostLibrary
 
 $selectedTargetedModes = @(
-  @($CliMirrorOnly, $RuntimeOnly, $BrowserDiscoveryOnly, $BrowserCacheOnly, $BrowserNativeHostOnly, $EdgeNativeHostOnly, $ChromeAppxBootstrapOnly, $ComputerUseCacheOnly, $TmpRuntimeMarketplaceOnly) | Where-Object { $_ }
+  @($CliMirrorOnly, $RuntimeOnly, $BrowserDiscoveryOnly, $BrowserCacheOnly, $BrowserNativeHostOnly, $EdgeNativeHostOnly, $chromeBootstrapOnly, $ComputerUseCacheOnly, $TmpRuntimeMarketplaceOnly) | Where-Object { $_ }
 )
 if ($selectedTargetedModes.Count -gt 1) {
-  throw 'Choose only one targeted repair mode: -CliMirrorOnly, -RuntimeOnly, -BrowserDiscoveryOnly, -BrowserCacheOnly, -BrowserNativeHostOnly, -EdgeNativeHostOnly, -ChromeAppxBootstrapOnly, -ComputerUseCacheOnly, or -TmpRuntimeMarketplaceOnly.'
+  throw 'Choose only one targeted repair mode: -CliMirrorOnly, -RuntimeOnly, -BrowserDiscoveryOnly, -BrowserCacheOnly, -BrowserNativeHostOnly, -EdgeNativeHostOnly, -ChromeAppxBootstrapOnly/-ChromeAppServerBootstrapOnly, -ComputerUseCacheOnly, or -TmpRuntimeMarketplaceOnly.'
 }
 if ($AutomaticPostUpdate -and $selectedTargetedModes.Count -gt 0) {
   throw '-AutomaticPostUpdate cannot be combined with a targeted repair mode.'
@@ -2705,7 +2707,7 @@ if ($CliMirrorOnly) {
   exit 0
 }
 
-if ($ChromeAppxBootstrapOnly) {
+if ($chromeBootstrapOnly) {
   Write-Step 'Starting direct AppX Chrome bootstrap; marketplace registration is not used.'
 
   $currentPackage = Get-AppxPackage -Name 'OpenAI.Codex' -ErrorAction SilentlyContinue |

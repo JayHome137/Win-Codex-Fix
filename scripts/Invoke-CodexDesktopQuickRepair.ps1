@@ -1,5 +1,5 @@
 param(
-  [ValidateSet('Auto','CliMirrorOnly','RuntimeOnly','BrowserDiscoveryOnly','BrowserCacheOnly','BrowserNativeHostOnly','EdgeNativeHostOnly','ChromeAppxBootstrapOnly','ComputerUseCacheOnly','TmpRuntimeMarketplaceOnly','Verify')]
+  [ValidateSet('Auto','CliMirrorOnly','RuntimeOnly','BrowserDiscoveryOnly','BrowserCacheOnly','BrowserNativeHostOnly','EdgeNativeHostOnly','ChromeAppxBootstrapOnly','ChromeAppServerBootstrapOnly','ComputerUseCacheOnly','TmpRuntimeMarketplaceOnly','Verify')]
   [string]$Route = 'Auto',
   [switch]$ArmAfterExit,
   [string]$ProjectRoot = ''
@@ -43,7 +43,9 @@ function Invoke-VerifyBrowserNativeHost {
 }
 
 function Invoke-VerifyChromeAppxBootstrap {
-  $output = @(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Verify -ChromeAppxBootstrapOnly 2>&1)
+  param([switch]$AppServerAlias)
+  $verifyArguments = if ($AppServerAlias) { @('-ChromeAppServerBootstrapOnly') } else { @('-ChromeAppxBootstrapOnly') }
+  $output = @(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Verify @verifyArguments 2>&1)
   $code = if ($null -eq $LASTEXITCODE) { 0 } else { [int]$LASTEXITCODE }
   foreach ($line in $output) { Write-Host $line }
   return [pscustomobject]@{ Code = $code; Text = ($output -join "`n") }
@@ -82,6 +84,7 @@ function Invoke-Target([string]$Target) {
     'BrowserNativeHostOnly' { return Invoke-Child $Repair @('-BrowserNativeHostOnly') }
     'EdgeNativeHostOnly' { return Invoke-Child $Repair @('-EdgeNativeHostOnly') }
     'ChromeAppxBootstrapOnly' { return Invoke-Child $Repair @('-ChromeAppxBootstrapOnly') }
+    'ChromeAppServerBootstrapOnly' { return Invoke-Child $Repair @('-ChromeAppServerBootstrapOnly') }
     'ComputerUseCacheOnly' { return Invoke-Child $Repair @('-ComputerUseCacheOnly') }
     'TmpRuntimeMarketplaceOnly' { return Invoke-Child $Repair @('-TmpRuntimeMarketplaceOnly') }
     'Verify' { return (Invoke-VerifyQuick).Code }
@@ -91,14 +94,14 @@ function Invoke-Target([string]$Target) {
 
 if ($Route -ne 'Auto') {
   $targetResult = Invoke-Target $Route
-  if ($Route -in @('CliMirrorOnly','RuntimeOnly','BrowserDiscoveryOnly','BrowserCacheOnly','BrowserNativeHostOnly','EdgeNativeHostOnly','ChromeAppxBootstrapOnly','ComputerUseCacheOnly','TmpRuntimeMarketplaceOnly')) {
+  if ($Route -in @('CliMirrorOnly','RuntimeOnly','BrowserDiscoveryOnly','BrowserCacheOnly','BrowserNativeHostOnly','EdgeNativeHostOnly','ChromeAppxBootstrapOnly','ChromeAppServerBootstrapOnly','ComputerUseCacheOnly','TmpRuntimeMarketplaceOnly')) {
     if ($targetResult -eq 0) {
       $targetResult = if ($Route -eq 'BrowserNativeHostOnly') {
         (Invoke-VerifyBrowserNativeHost).Code
       } elseif ($Route -eq 'EdgeNativeHostOnly') {
         (Invoke-VerifyEdgeNativeHost).Code
-      } elseif ($Route -eq 'ChromeAppxBootstrapOnly') {
-        (Invoke-VerifyChromeAppxBootstrap).Code
+      } elseif ($Route -in @('ChromeAppxBootstrapOnly','ChromeAppServerBootstrapOnly')) {
+        (Invoke-VerifyChromeAppxBootstrap -AppServerAlias:($Route -eq 'ChromeAppServerBootstrapOnly')).Code
       } elseif ($Route -eq 'ComputerUseCacheOnly') {
         (Invoke-VerifyComputerUseCache).Code
       } else {
@@ -130,14 +133,14 @@ $failureText = (($quick.Text -split "`n") | Where-Object { $_ -match '^\[FAIL\]'
 $selectedRoute = $null
 if ($failureText -match '(?i)code-mode-host|CLI mirror|codex-cli') {
   $selectedRoute = 'CliMirrorOnly'
+} elseif ($failureText -match '(?i)resourcesPath|nodePath|nodeModuleDirs|nodeReplPath|node_repl|cua_node') {
+  $selectedRoute = 'ChromeAppServerBootstrapOnly'
 } elseif ($failureText -match '(?i)chrome latest|chrome metadata|chrome native|native host v2|extension-host-config') {
   $selectedRoute = 'ChromeAppxBootstrapOnly'
 } elseif ($failureText -match '(?i)computer-use (?:plugin metadata|latest|metadata)|Computer Use plugin-cache') {
   $selectedRoute = 'ComputerUseCacheOnly'
 } elseif ($failureText -match '(?i)browser|plugin discovery|browser-client') {
   $selectedRoute = 'BrowserCacheOnly'
-} elseif ($failureText -match '(?i)resourcesPath|nodePath|nodeModuleDirs|nodeReplPath|node_repl|cua_node') {
-  $selectedRoute = 'RuntimeOnly'
 } elseif ($failureText -match '(?i)edge native host|Microsoft\\Edge\\NativeMessagingHosts') {
   $selectedRoute = 'EdgeNativeHostOnly'
 } elseif ($failureText -match '(?i)native host|native-host|allowed_origins|NativeMessagingHosts') {
@@ -164,8 +167,8 @@ $final = if ($selectedRoute -eq 'BrowserNativeHostOnly') {
   Invoke-VerifyBrowserNativeHost
 } elseif ($selectedRoute -eq 'EdgeNativeHostOnly') {
   Invoke-VerifyEdgeNativeHost
-} elseif ($selectedRoute -eq 'ChromeAppxBootstrapOnly') {
-  Invoke-VerifyChromeAppxBootstrap
+} elseif ($selectedRoute -in @('ChromeAppxBootstrapOnly','ChromeAppServerBootstrapOnly')) {
+  Invoke-VerifyChromeAppxBootstrap -AppServerAlias:($selectedRoute -eq 'ChromeAppServerBootstrapOnly')
 } elseif ($selectedRoute -eq 'ComputerUseCacheOnly') {
   Invoke-VerifyComputerUseCache
 } else {

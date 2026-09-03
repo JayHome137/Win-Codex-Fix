@@ -133,12 +133,13 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File .\deploy\Install-FastRepair.ps
 | `BrowserCacheOnly` | 只恢复当前 AppX Browser cache |
 | `BrowserNativeHostOnly` | 只同步复数扩展 ID、legacy manifest、Chrome HKCU 映射与两份 v2 Native Host manifest；无需关闭 Codex、Chrome、Edge |
 | `EdgeNativeHostOnly` | 仅在 Edge profile 已安装目标扩展且 Edge 专用 HKCU 注册表键缺失/漂移时补齐映射；不改 Chrome 或共享 manifest |
-| `ChromeAppxBootstrapOnly` | 不经过 marketplace，直接用当前 AppX Chrome 和官方 `installManifest.mjs` 重建 Chrome cache、sidecar、legacy/v2 manifest 与 HKCU 映射 |
+| `ChromeAppServerBootstrapOnly` | 处理 `nodePath` 等 app-server 路径错误；直接用当前 AppX Chrome 和官方 `installManifest.mjs` 重建 bootstrap 链 |
+| `ChromeAppxBootstrapOnly` | `ChromeAppServerBootstrapOnly` 的兼容旧名 |
 | `ComputerUseCacheOnly` | 不经过 marketplace，直接用当前 AppX 同步 Computer Use 插件 cache 与发现链接；不修改 `cua_node` 运行时 |
 | `TmpRuntimeMarketplaceOnly` | 只处理已确认的旧临时 marketplace junction |
 | `Verify` | 只运行 Quick verifier，不写入 |
 
-`ChromeAppxBootstrapOnly` 只验证 Chrome 链路本身：当前 AppX 文件集、cache 发现链接、官方 sidecar、legacy/v2 Native Host 和 HKCU 映射。Browser、Computer Use、CLI mirror 或 marketplace 的其它失败会单独报告，不会被伪装成“全部修复”。
+`ChromeAppServerBootstrapOnly`（旧名 `ChromeAppxBootstrapOnly`）只验证 Chrome app-server 链路本身：当前 AppX 文件集、cache 发现链接、官方 sidecar、legacy/v2 Native Host 和 HKCU 映射。Browser、Computer Use、CLI mirror 或 marketplace 的其它失败会单独报告，不会被伪装成“全部修复”。
 
 `ComputerUseCacheOnly` 只验证 Computer Use 插件版本、实体文件和 `latest`/`.codex-plugin` 链接；`cua_node` 运行时漂移仍由 `RuntimeOnly` 单独负责。
 

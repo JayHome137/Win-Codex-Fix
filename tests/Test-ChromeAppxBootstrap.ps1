@@ -15,11 +15,16 @@ $quick = Get-Content -LiteralPath (Join-Path $ProjectRoot 'scripts\Invoke-CodexD
 $verify = Get-Content -LiteralPath (Join-Path $ProjectRoot 'scripts\Verify-CodexDesktopBundled.ps1') -Raw
 
 Assert-True ($repair -match '\[switch\]\$ChromeAppxBootstrapOnly') 'Repair route parameter is missing'
+Assert-True ($repair -match '\[switch\]\$ChromeAppServerBootstrapOnly') 'App-server bootstrap compatibility route parameter is missing'
 Assert-True ($quick -match "'ChromeAppxBootstrapOnly'") 'Quick route dispatch is missing'
+Assert-True ($quick -match "'ChromeAppServerBootstrapOnly'") 'App-server bootstrap quick route dispatch is missing'
 Assert-True ($quick -match "-ChromeAppxBootstrapOnly") 'Quick child argument is missing'
+Assert-True ($quick -match "-ChromeAppServerBootstrapOnly") 'App-server bootstrap quick child argument is missing'
 Assert-True ($verify -match '\[switch\]\$ChromeAppxBootstrapOnly') 'Chrome bootstrap verifier mode is missing'
+Assert-True ($verify -match '\[switch\]\$ChromeAppServerBootstrapOnly') 'App-server bootstrap verifier compatibility mode is missing'
+Assert-True ($quick -match "resourcesPath\|nodePath\|nodeModuleDirs\|nodeReplPath\|node_repl\|cua_node") 'Auto route does not classify app-server path errors'
 
-$start = $repair.IndexOf('if ($ChromeAppxBootstrapOnly)')
+$start = $repair.IndexOf('if ($chromeBootstrapOnly)')
 $end = $repair.IndexOf('if ($BrowserNativeHostOnly)', $start)
 Assert-True ($start -ge 0 -and $end -gt $start) 'Chrome bootstrap route boundaries are missing'
 $route = $repair.Substring($start, $end - $start)
