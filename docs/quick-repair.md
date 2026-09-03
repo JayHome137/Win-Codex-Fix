@@ -17,7 +17,9 @@ pwsh.exe -NoProfile -NonInteractive -File "$root\scripts\Invoke-CodexDesktopQuic
 
 如果占用者已经自然退出，直接重跑同一路由，不使用 `-ArmAfterExit`。任何 `manual-required`、`selected route failed` 或无法确认唯一 owner 的结果，都要明确提示未完成并停止。
 
-显式 route 仅在错误 owner 已明确时使用：`CliMirrorOnly`、`RuntimeOnly`、`BrowserDiscoveryOnly`、`BrowserCacheOnly`、`BrowserNativeHostOnly`、`EdgeNativeHostOnly`、`ChromeAppServerBootstrapOnly`、`ComputerUseCacheOnly`、`TmpRuntimeMarketplaceOnly`、`Verify`。`ChromeAppxBootstrapOnly` 保留为兼容旧名。`TmpRuntimeMarketplaceOnly` 只在 Codex 稳定退出后刷新落后的 `.tmp\\bundled-marketplaces\\openai-bundled` 主机副本。
+显式 route 仅在错误 owner 已明确时使用：`CliMirrorOnly`、`RuntimeOnly`、`BrowserDiscoveryOnly`、`BrowserCacheOnly`、`BrowserNativeHostOnly`、`EdgeNativeHostOnly`、`ChromeAppServerBootstrapOnly`、`ComputerUseCacheOnly`、`TmpRuntimeMarketplaceOnly`、`UiCapabilityDiagnosticOnly`、`Verify`。`ChromeAppxBootstrapOnly` 保留为兼容旧名。`TmpRuntimeMarketplaceOnly` 只在 Codex 稳定退出后刷新落后的 `.tmp\\bundled-marketplaces\\openai-bundled` 主机副本。
+
+`UiCapabilityDiagnosticOnly` 是只读的最小复现/归因探针：当 Quick 已全绿、但 UI 仍缺少 In-app Browser 或 Computer Use 时，读取 `node_repl.env` 的 backend/能力开关并输出 `feature-gate-or-policy`、`local-capability-ready` 等状态。它不会改写 `config.toml`、伪造 Statsig/账户能力或重启进程；出现 feature gate 时应停止本地修复并按服务端/账户能力处理。
 
 `CliMirrorOnly` 同步当前 AppX 的 `codex.exe` 与 `codex-code-mode-host.exe` 配对；Code Mode IPC 报错若发生在 probe 启动前，优先只走这条路由。
 

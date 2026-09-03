@@ -137,11 +137,14 @@ pwsh.exe -NoProfile -ExecutionPolicy Bypass -File .\deploy\Install-FastRepair.ps
 | `ChromeAppxBootstrapOnly` | `ChromeAppServerBootstrapOnly` 的兼容旧名 |
 | `ComputerUseCacheOnly` | 不经过 marketplace，直接用当前 AppX 同步 Computer Use 插件 cache 与发现链接；不修改 `cua_node` 运行时 |
 | `TmpRuntimeMarketplaceOnly` | 只刷新已确认落后于当前 AppX 的 `.tmp\bundled-marketplaces\openai-bundled` 主机临时副本；需要 Codex 稳定退出 |
+| `UiCapabilityDiagnosticOnly` | Quick 全绿但 UI 仍缺失时，只读区分本地能力配置与服务端/账户 feature gate；不写配置 |
 | `Verify` | 只运行 Quick verifier，不写入 |
 
 `ChromeAppServerBootstrapOnly`（旧名 `ChromeAppxBootstrapOnly`）只验证 Chrome app-server 链路本身：当前 AppX 文件集、cache 发现链接、官方 sidecar、legacy/v2 Native Host 和 HKCU 映射。Browser、Computer Use、CLI mirror 或 marketplace 的其它失败会单独报告，不会被伪装成“全部修复”。
 
 `ComputerUseCacheOnly` 只验证 Computer Use 插件版本、实体文件和 `latest`/`.codex-plugin` 链接；`cua_node` 运行时漂移仍由 `RuntimeOnly` 单独负责。
+
+当 Quick 已全绿、但 In-app Browser 或 Computer Use 仍不显示时，使用 `UiCapabilityDiagnosticOnly` 做最小能力探针。若结果为 `feature-gate-or-policy`，问题已超出本地 cache/manifest 修复范围，不应通过改写配置伪造账户或服务端能力。
 
 显式路由只应在故障 owner 已经明确时使用。普通更新后优先运行一次 `Auto`。
 

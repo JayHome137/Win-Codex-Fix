@@ -1,5 +1,5 @@
 param(
-  [ValidateSet('Auto','CliMirrorOnly','RuntimeOnly','BrowserDiscoveryOnly','BrowserCacheOnly','BrowserNativeHostOnly','EdgeNativeHostOnly','ChromeAppxBootstrapOnly','ChromeAppServerBootstrapOnly','ComputerUseCacheOnly','TmpRuntimeMarketplaceOnly','Verify')]
+  [ValidateSet('Auto','CliMirrorOnly','RuntimeOnly','BrowserDiscoveryOnly','BrowserCacheOnly','BrowserNativeHostOnly','EdgeNativeHostOnly','ChromeAppxBootstrapOnly','ChromeAppServerBootstrapOnly','ComputerUseCacheOnly','TmpRuntimeMarketplaceOnly','UiCapabilityDiagnosticOnly','Verify')]
   [string]$Route = 'Auto',
   [switch]$ArmAfterExit,
   [string]$ProjectRoot = ''
@@ -13,6 +13,7 @@ $Root = [System.IO.Path]::GetFullPath($Root)
 $Scripts = Join-Path $Root 'scripts'
 $Repair = Join-Path $Scripts 'Repair-CodexDesktopBundled.ps1'
 $Verify = Join-Path $Scripts 'Verify-CodexDesktopBundled.ps1'
+$UiProbe = Join-Path $Scripts 'Diagnose-CodexDesktopUiCapability.ps1'
 $AfterExit = Join-Path $Scripts 'Start-CodexDesktopQuickRepairAfterExit.ps1'
 
 function Invoke-Child([string]$Path, [string[]]$Arguments) {
@@ -65,6 +66,16 @@ function Invoke-VerifyEdgeNativeHost {
   return [pscustomobject]@{ Code = $code; Text = ($output -join "`n") }
 }
 
+function Invoke-UiCapabilityProbe {
+  if (-not (Test-Path -LiteralPath $UiProbe -PathType Leaf)) {
+    throw "Missing UI capability probe: $UiProbe"
+  }
+  $output = @(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $UiProbe 2>&1)
+  $code = if ($null -eq $LASTEXITCODE) { 0 } else { [int]$LASTEXITCODE }
+  foreach ($line in $output) { Write-Host $line }
+  return $code
+}
+
 if ($ArmAfterExit) {
   if (-not (Test-Path -LiteralPath $AfterExit -PathType Leaf)) {
     throw "Missing one-shot after-exit helper: $AfterExit"
@@ -87,6 +98,7 @@ function Invoke-Target([string]$Target) {
     'ChromeAppServerBootstrapOnly' { return Invoke-Child $Repair @('-ChromeAppServerBootstrapOnly') }
     'ComputerUseCacheOnly' { return Invoke-Child $Repair @('-ComputerUseCacheOnly') }
     'TmpRuntimeMarketplaceOnly' { return Invoke-Child $Repair @('-TmpRuntimeMarketplaceOnly') }
+    'UiCapabilityDiagnosticOnly' { return Invoke-UiCapabilityProbe }
     'Verify' { return (Invoke-VerifyQuick).Code }
     default { throw "Unsupported quick repair route: $Target" }
   }

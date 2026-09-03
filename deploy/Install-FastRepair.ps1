@@ -54,6 +54,7 @@ $projectFiles = @(
   'scripts\BrowserNativeHost.ps1',
   'scripts\ChromeOpaqueTextMaterialization.ps1',
   'scripts\Invoke-CodexDesktopQuickRepair.ps1',
+  'scripts\Diagnose-CodexDesktopUiCapability.ps1',
   'scripts\Start-CodexDesktopQuickRepairAfterExit.ps1',
   'scripts\Repair-CodexDesktopBundled.ps1',
   'scripts\Repair-CodexSessionIndex.ps1',
@@ -67,6 +68,9 @@ $projectFiles = @(
   'tests\Test-ComputerUseCache.ps1',
   'tests\Test-EdgeNativeHost.ps1',
   'tests\Test-CliMirrorPair.ps1',
+  'tests\Test-UiCapabilityDiagnostic.ps1',
+  'tests\fixtures\ui-capability-gated.config.toml',
+  'tests\fixtures\ui-capability-ready.config.toml',
   'docs\quick-repair.md',
   '.github\ISSUE_TEMPLATE\bug-report.md'
 )
